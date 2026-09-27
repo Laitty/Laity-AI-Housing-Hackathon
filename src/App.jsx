@@ -118,6 +118,118 @@ const REPORT_TABS = [
   { id: 'actions', label: 'Actions' },
 ];
 
+function FloatingReport({ label, onClose, mapAreaRef, comparisonExpanded, bodyRef, children }) {
+  const sheetRef = useRef(null);
+  const interaction = useRef(null);
+  const [geometry, setGeometry] = useState(null);
+
+  const availableHeight = useCallback(() => {
+    const height = mapAreaRef.current?.clientHeight || 0;
+    if (window.matchMedia('(max-width: 960px)').matches) return height - 12;
+    return height - (comparisonExpanded ? Math.min(322, window.innerHeight * .55 + 12) : 12);
+  }, [mapAreaRef, comparisonExpanded]);
+
+  const keepInsideMap = useCallback((rect) => {
+    const width = mapAreaRef.current?.clientWidth || 0;
+    const height = availableHeight();
+    const nextWidth = Math.min(rect.width, Math.max(1, width - 24));
+    const nextHeight = Math.min(rect.height, Math.max(1, height - 24));
+    return {
+      width: nextWidth,
+      height: nextHeight,
+      left: Math.min(Math.max(12, rect.left), Math.max(12, width - nextWidth - 12)),
+      top: Math.min(Math.max(12, rect.top), Math.max(12, height - nextHeight - 12)),
+    };
+  }, [mapAreaRef, availableHeight]);
+
+  useEffect(() => {
+    if (!mapAreaRef.current) return;
+    const observer = new ResizeObserver(() => setGeometry((current) => current && keepInsideMap(current)));
+    observer.observe(mapAreaRef.current);
+    setGeometry((current) => current && keepInsideMap(current));
+    return () => observer.disconnect();
+  }, [mapAreaRef, keepInsideMap]);
+
+  useEffect(() => () => interaction.current?.cleanup?.(), []);
+
+  function currentGeometry() {
+    const sheet = sheetRef.current.getBoundingClientRect();
+    const parent = mapAreaRef.current.getBoundingClientRect();
+    return { left: sheet.left - parent.left, top: sheet.top - parent.top, width: sheet.width, height: sheet.height };
+  }
+
+  function startInteraction(event, mode) {
+    if (event.button !== 0 || event.target.closest('.parcel-sheet-close')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const start = keepInsideMap(currentGeometry());
+    const onMove = (moveEvent) => moveInteraction(moveEvent);
+    const onEnd = (endEvent) => endInteraction(endEvent);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onEnd);
+    interaction.current = {
+      mode, pointerId: event.pointerId, x: event.clientX, y: event.clientY, start,
+      cleanup: () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onEnd);
+        window.removeEventListener('pointercancel', onEnd);
+      },
+    };
+    setGeometry(start);
+  }
+
+  function moveInteraction(event) {
+    const active = interaction.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+    const dx = event.clientX - active.x;
+    const dy = event.clientY - active.y;
+    const maxWidth = Math.max(1, (mapAreaRef.current?.clientWidth || 0) - active.start.left - 12);
+    const maxHeight = Math.max(1, availableHeight() - active.start.top - 12);
+    const next = active.mode === 'move'
+      ? { ...active.start, left: active.start.left + dx, top: active.start.top + dy }
+      : { ...active.start, width: Math.min(maxWidth, Math.max(Math.min(300, maxWidth), active.start.width + dx)), height: Math.min(maxHeight, Math.max(Math.min(230, maxHeight), active.start.height + dy)) };
+    setGeometry(keepInsideMap(next));
+  }
+
+  function endInteraction(event) {
+    if (interaction.current?.pointerId !== event.pointerId) return;
+    interaction.current.cleanup();
+    interaction.current = null;
+  }
+
+  function handleKeys(event, mode) {
+    const directions = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    if (!directions[event.key]) return;
+    event.preventDefault();
+    const [x, y] = directions[event.key];
+    const amount = event.shiftKey ? 40 : 10;
+    const start = geometry || currentGeometry();
+    if (mode === 'move') setGeometry(keepInsideMap({ ...start, left: start.left + x * amount, top: start.top + y * amount }));
+    else {
+      const maxWidth = Math.max(1, (mapAreaRef.current?.clientWidth || 0) - start.left - 12);
+      const maxHeight = Math.max(1, availableHeight() - start.top - 12);
+      setGeometry(keepInsideMap({ ...start, width: Math.min(maxWidth, Math.max(Math.min(300, maxWidth), start.width + x * amount)), height: Math.min(maxHeight, Math.max(Math.min(230, maxHeight), start.height + y * amount)) }));
+    }
+  }
+
+  return <aside ref={sheetRef} className={`parcel-sheet ${geometry ? 'is-positioned' : ''}`} style={geometry ? { left: geometry.left, top: geometry.top, right: 'auto', bottom: 'auto', width: geometry.width, height: geometry.height, maxHeight: 'none' } : undefined} aria-label={`Site report for ${label}`}>
+    <div className="parcel-sheet-head">
+      <div className="parcel-sheet-drag" role="button" tabIndex={0} aria-label="Move site report. Drag or use arrow keys."
+        onPointerDown={(event) => startInteraction(event, 'move')}
+        onKeyDown={(event) => handleKeys(event, 'move')}>
+        <span>SITE REPORT <small>· DRAG TO MOVE</small></span><strong>{label}</strong>
+      </div>
+      <button className="parcel-sheet-close" type="button" onClick={onClose} aria-label="Close site report"><X size={18} /></button>
+    </div>
+    <div className="parcel-sheet-body" ref={bodyRef}>{children}</div>
+    <button className="parcel-sheet-resize" type="button" aria-label="Resize site report. Drag or use arrow keys."
+      onPointerDown={(event) => startInteraction(event, 'resize')}
+      onKeyDown={(event) => handleKeys(event, 'resize')}><span /></button>
+  </aside>;
+}
+
 function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, zoningReviewReasons, scrollContainerRef }) {
   const { score, overlays, assessment, sourceErrors, queriedAt, decision, idEvidence, districts = [] } = evaluation;
   const [activeTab, setActiveTab] = useState('overview');
@@ -697,9 +809,8 @@ export default function App() {
           {boundaryStatus !== 'loading' && layers.parcels && zoom < MIN_PARCEL_ZOOM && !selected && <div className="zoom-hint"><span className="hint-icon"><MousePointer2 size={17} /></span><span><strong>Explore Pittsburgh</strong><small>Search a parcel ID or zoom in to select a site</small></span><ChevronRight size={16} /></div>}
           <div className="map-bottom-left"><span className="status-pulse" /><span>{loading.parcels || loading.zoning ? 'Loading map data' : zoom >= MIN_PARCEL_ZOOM && layers.parcels ? `${parcelCount.toLocaleString()} parcels · ${zoningCount} zoning areas` : zoom >= MIN_ZONING_ZOOM && layers.zoning ? `${zoningCount} zoning areas · zoom in for parcels` : 'Pittsburgh overview · zoom in for districts'}</span><span className="status-divider" /> <span>ZOOM {zoom}</span></div>
           <div className="map-north">N <span>↑</span></div>
-          {selected && <aside className="parcel-sheet" key={selected.pin} aria-label={`Site report for ${selected.properties.MAPBLOCKLOT || selected.pin}`}>
-            <div className="parcel-sheet-head"><div><span>SITE REPORT</span><strong>{selected.properties.MAPBLOCKLOT || selected.pin}</strong></div><button type="button" onClick={clearSelection} aria-label="Close site report"><X size={18} /></button></div>
-            <div className="parcel-sheet-body" ref={selectedCard}>
+          {selected && <FloatingReport key={selected.pin} label={selected.properties.MAPBLOCKLOT || selected.pin} onClose={clearSelection} mapAreaRef={mapArea} comparisonExpanded={comparisonExpanded} bodyRef={selectedCard}>
+            <div className="parcel-sheet-content">
               <div className="selected-card">
                 <div className="selected-pin"><MapPin size={17} strokeWidth={1.8} /><span>County parcel · {selected.properties.MAPBLOCKLOT || selected.pin}</span><Check size={16} /></div>
                 <button className="add-comparison" type="button" onClick={addSelectedToComparison}>Add to comparison <ArrowUpRight size={14} /></button>
@@ -708,7 +819,7 @@ export default function App() {
                 {selected.evaluation?.scenario.id === scenario && <ScorePanel evaluation={selected.evaluation} scenarioOptions={selected.scenarioOptions} onScenarioChange={setScenario} areaLabel={areaLabel} zoningReviewReasons={zoningReviewReasons} scrollContainerRef={selectedCard} />}
               </div>
             </div>
-          </aside>}
+          </FloatingReport>}
         </section>
         {comparisonIds.length > 0 && <ComparisonBoard comparison={comparison} loading={comparisonLoading} error={comparisonError} onOpen={openComparisonParcel} onClear={clearComparison} scenario={scenario} policy={policy} expanded={comparisonExpanded} onToggle={() => setComparisonExpanded((value) => !value)} count={comparisonIds.length} />}
       </main>
