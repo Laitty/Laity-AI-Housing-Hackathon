@@ -20,6 +20,10 @@ export function validateParcelMatch(parsed, features) {
     return { error: matches.length ? 'This ID matches multiple county GIS parcels; use a full 16-character PIN.' : 'No exact county GIS parcel match.' };
   }
   const feature = matches[0];
+  const municipality = Number(feature.properties?.MUNICODE);
+  if (!Number.isInteger(municipality) || municipality < 101 || municipality > 132) {
+    return { error: 'This parcel is outside Pittsburgh city limits (wards 1–32).', status: 422 };
+  }
   const pin = String(feature.properties?.PIN || '').toUpperCase();
   if (!/^[0-9A-Z]{16}$/.test(pin)) return { error: 'The matched county feature has no standard 16-character PIN.' };
   return { feature, evidence: {

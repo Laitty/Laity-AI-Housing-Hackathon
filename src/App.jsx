@@ -51,12 +51,13 @@ function DataLink({ href, children }) {
   return <a href={href} target="_blank" rel="noreferrer">{children}<ArrowUpRight size={13} strokeWidth={1.7} /></a>;
 }
 
-const SCORE_GROUPS = ['Zoning & rules', 'Parcel conditions', 'Environment & terrain'];
-const GROUP_WEIGHTS = { 'Zoning & rules': 45, 'Parcel conditions': 25, 'Environment & terrain': 30 };
+const RULE_GROUPS = ['Approval path', 'Site fit'];
+const RISK_GROUPS = ['Environment', 'Infrastructure'];
 const SCENARIOS = [
   { id: 'starter', title: 'Starter home', short: '1 home' },
   { id: 'duplex', title: 'Two-unit home', short: '2 homes' },
   { id: 'fourplex', title: 'Small multi-unit', short: '4 homes' },
+  { id: 'reuse', title: 'Repair or enlarge', short: 'Reuse' },
 ];
 
 function scoreLabel(score) {
@@ -81,7 +82,8 @@ function groupResult(score, group) {
   const entries = score.items.filter((entry) => entry.group === group);
   const known = entries.reduce((total, entry) => total + (entry.earned ?? 0), 0);
   const unknown = entries.reduce((total, entry) => total + (entry.earned === null ? entry.weight : 0), 0);
-  return { entries, known, unknown, weight: GROUP_WEIGHTS[group] };
+  const weight = entries.reduce((total, entry) => total + entry.weight, 0);
+  return { entries, known, unknown, weight };
 }
 
 function cityMaskRings(collection) {
@@ -99,6 +101,7 @@ function cityMaskRings(collection) {
 
 function ScoreGroup({ score, group }) {
   const { entries, known, unknown, weight } = groupResult(score, group);
+  if (!entries.length) return null;
   return <section className="score-group">
     <div className="score-group-head"><strong>{group}</strong><span>{unknown ? `${known}–${known + unknown}` : known} / {weight}</span></div>
     {entries.map((entry) => <details className="score-item" key={entry.key}>
@@ -147,20 +150,22 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, 
       {activeTab === 'overview' && <>
         <div className="evaluation-heading"><span>DEVELOPMENT EASE · PROTOTYPE</span><small>{evaluation.scenario.title.toUpperCase()}</small></div>
         <div className={`score-summary ${score.displayRange ? 'is-scored' : 'needs-review'}`}><strong>{score.displayRange ? scoreLabel(score) : 'Review required'}</strong><span>{score.displayRange ? `/ 100 · ${score.status}` : score.status}</span></div>
-        <p className="score-caption"><b>Evidence coverage: {score.knownWeight}/100 weighted points.</b> {score.knownWeight < 100 ? 'Unknown factors widen the range. ' : ''}{!score.displayRange ? 'The headline score is withheld until the use or approval path is reviewed. ' : ''}This is a relative screening result, not a permit decision.</p>
+        <p className="score-caption"><b>Evidence coverage: {score.knownWeight}/100 weighted points.</b> {score.knownWeight < 100 ? 'Unknown factors widen the range. ' : ''}Water and sewer capacity stays unknown on every parcel. This is a relative screening score, not a permit decision.</p>
         <div className={`evidence-coverage ${score.knownWeight < 100 ? 'partial' : 'complete'}`} role="img" aria-label={`${score.knownWeight} of 100 weighted points have source data`}><span style={{ width: `${score.knownWeight}%` }} /></div>
+        {evaluation.explanation && <section className="score-explanation"><h3>Why this score</h3><p>{evaluation.explanation.summary}</p><p><b>Highest-impact change.</b> {evaluation.explanation.intervention.sentence}</p></section>}
         <div className="overview-highlights" aria-label="Site findings and next step">
           <div className={keyConstraint ? 'highlight-constraint' : score.displayRange ? 'highlight-confirmed' : 'highlight-verify'}><span>{score.displayRange ? 'KEY CONSTRAINT' : 'APPROVAL PATH'}</span><strong>{keyConstraint?.title || (score.displayRange ? 'No mapped constraint flagged' : score.status)}</strong><p>{keyConstraint?.detail || (score.displayRange ? 'Only the screened source layers are covered; check the full rules and site conditions.' : 'Confirm the current use and review route with the City before treating this as a buildable site.')}</p></div>
           <div className="highlight-verify"><span>NEEDS VERIFICATION</span><strong>{firstVerification?.title || 'Confirm site-specific requirements'}</strong></div>
           {decision.nextActions[0] && <div className="highlight-action"><span>FIRST ACTION</span><strong>{decision.nextActions[0].title}</strong></div>}
         </div>
-        {scenarioOptions?.length > 0 && <section className="scenario-matrix"><h3>Same parcel · three housing options</h3><div>
+        {scenarioOptions?.length > 0 && <section className="scenario-matrix"><h3>Same parcel · housing options</h3><div>
           {scenarioOptions.map((option) => <button type="button" className={option.scenario.id === evaluation.scenario.id ? 'active' : ''} key={option.scenario.id} onClick={() => onScenarioChange(option.scenario.id)}>
             <span>{option.scenario.title}</span><strong>{scoreLabel(option.score)}</strong>
           </button>)}
-        </div><p>Each option uses its own use-table screen and prototype space thresholds. “Review” means no headline score.</p></section>}
-        <div className="overview-breakdown">{SCORE_GROUPS.map((group) => {
+        </div><p>Each building type has its own score. A lower number is a harder path for that building, and the range stays visible.</p></section>}
+        <div className="overview-breakdown">{[...RULE_GROUPS, ...RISK_GROUPS].map((group) => {
           const { known, unknown, weight } = groupResult(score, group);
+          if (!weight) return null;
           return <div key={group}><span>{group}</span><strong>{unknown ? `${known}–${known + unknown}` : known} / {weight}</strong><i><b style={{ width: `${Math.min(100, 100 * known / weight)}%` }} /></i></div>;
         })}</div>
         <div className="site-facts"><strong>Parcel ID & source join</strong>
@@ -177,13 +182,13 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, 
       </>}
       {activeTab === 'rules' && <>
         <p className="tab-intro">How the mapped parcel and selected housing type compare with the screened zoning and site rules.</p>
-        <ScoreGroup score={score} group="Zoning & rules" /><ScoreGroup score={score} group="Parcel conditions" />
+        {RULE_GROUPS.map((group) => <ScoreGroup score={score} group={group} key={group} />)}
         <EvidenceList title="Zoning & policy findings" entries={ruleFindings} />
       </>}
       {activeTab === 'risks' && <>
         <p className="tab-intro">Mapped overlaps confirm source intersections only. Site conditions and utility capacity still need direct checks.</p>
-        <ScoreGroup score={score} group="Environment & terrain" />
-        <div className="site-facts"><strong>Mapped overlaps</strong><p>Flood {overlays.flood ? `${overlays.flood.share.toFixed(1)}%` : 'unknown'} · Steep slope {overlays.slope ? `${overlays.slope.share.toFixed(1)}%` : 'unknown'} · Undermined {overlays.undermined ? `${overlays.undermined.share.toFixed(1)}%` : 'unknown'}</p>
+        {RISK_GROUPS.map((group) => <ScoreGroup score={score} group={group} key={group} />)}
+        <div className="site-facts"><strong>Mapped overlaps</strong><p>Flood {overlays.flood ? `${overlays.flood.share.toFixed(1)}%` : 'unknown'} · Steep slope {overlays.slope ? `${overlays.slope.share.toFixed(1)}%` : 'unknown'} · Undermined {overlays.undermined ? `${overlays.undermined.share.toFixed(1)}%` : 'unknown'} · Wetland {overlays.wetlands ? `${overlays.wetlands.share.toFixed(1)}%` : 'unknown'}</p>
           <p>City historic district {overlays.historic ? `${overlays.historic.share.toFixed(1)}%` : 'unknown'} (review flag only) · <DataLink href={evaluation.sources.historic}>Source</DataLink></p></div>
         <EvidenceList title="Environment & infrastructure" entries={riskFindings} />
         {Object.keys(sourceErrors).length > 0 && <p className="source-warning">Unavailable sources: {Object.entries(sourceErrors).map(([name, message]) => `${name} (${message})`).join('; ')}</p>}
@@ -205,7 +210,7 @@ function ComparisonBoard({ comparison, loading, error, onOpen, onClear, scenario
       <div className="comparison-header-actions"><button className="comparison-toggle" type="button" aria-expanded={expanded} aria-controls="comparison-content" onClick={onToggle}>{expanded ? 'Hide results' : 'Show results'} {expanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</button><button className="comparison-clear" type="button" onClick={onClear} aria-label="Clear comparison"><X size={16} /></button></div>
     </div>
     <div className="comparison-content" id="comparison-content" hidden={!expanded}>
-    <p className="comparison-intro">Scores compare the same building type. An unverified approval path stays “Review”. Policy changes are hypothetical.</p>
+    <p className="comparison-intro">Scores compare the same building type. Each parcel can score differently for one home, two homes, four homes, or a repair. Policy changes are hypothetical.</p>
     {loading && <p className="comparison-loading">Comparing county parcels and source layers…</p>}
     {error && <p className="source-warning">{error}</p>}
     {comparison && <div className="comparison-cards">{comparison.results.map((result) => {
@@ -219,7 +224,7 @@ function ComparisonBoard({ comparison, loading, error, onOpen, onClear, scenario
         <div className="compare-card-top"><span>{value.blockLot || result.requested}</span><button type="button" onClick={() => onOpen(value.pin)}>View on map <ArrowUpRight size={14} /></button></div>
         <small>PIN {value.pin} · {value.districts?.map((item) => item.code).join(' / ') || 'Zoning unknown'}</small>
         <div className="compare-score"><strong>{scoreLabel(value.score)}</strong><span>{value.score.displayRange ? '/ 100 baseline' : value.score.status}</span></div>
-        {impact && <p className="compare-impact"><b>Policy simulation:</b> {impact.newlyScreenable ? `new preliminary screen ${scoreLabel(hypothetical)}/100` : impact.scoreChange > 0 ? `+${impact.scoreChange} points` : hypothetical.displayRange ? `${scoreLabel(hypothetical)}/100; no score gain` : 'still needs review'}{policy.assumeUtilityCapacity ? ' · 1 infrastructure unknown assumed resolved (verify in reality)' : ''}</p>}
+        {impact && <p className="compare-impact"><b>Policy simulation:</b> {impact.newlyScreenable ? `new preliminary screen ${scoreLabel(hypothetical)}/100` : impact.scoreChange > 0 ? `+${impact.scoreChange} points` : hypothetical.displayRange ? `${scoreLabel(hypothetical)}/100; no score gain` : 'still needs review'}{policy.assumeUtilityCapacity ? ' · water and sewer capacity filled in the hypothetical only' : ''}</p>}
         <div className="compare-facts"><p><b>Confirmed source findings</b> {obstacles.length ? obstacles.slice(0, 2).map((item) => item.title).join(' · ') : 'No mapped obstacle in screened factors'}</p><p><b>Needs verification</b> {unresolved.slice(0, 2).map((item) => item.title).join(' · ')}</p><p><b>First action</b> {value.decision.nextActions[0]?.title || 'Review with City Planning'}</p></div>
       </article>;
     })}</div>}

@@ -1,4 +1,5 @@
 import { SCENARIOS, SOURCES } from './score.js';
+import { baseResidentialDimensions } from './zoning-dimensions.js';
 
 function finding(category, status, title, detail, source) {
   return { category, status, title, detail, source };
@@ -15,7 +16,7 @@ function step(status, title, detail, basis, source) {
 // Rules-based response contract. A future Jev provider can implement this
 // function without changing the compare API or the UI shape.
 export function getDecisionAdvice(context) {
-  const { scenario, score, parcel, assessment, districts, overlays, sourceErrors = {}, policy = {} } = context;
+  const { scenario, score, parcel, assessment, districts, overlays, sourceErrors = {}, policy = {}, reviewContext } = context;
   const chosen = SCENARIOS[scenario];
   const obstacles = [];
   const approvalPath = [];
@@ -55,8 +56,13 @@ export function getDecisionAdvice(context) {
     obstacles.push(finding('Zoning', 'verify', 'Dimensional standard not resolved',
       'The applicable numeric lot minimum or legal zoning lot has not been fully verified.', SOURCES.residentialCode));
   }
-  obstacles.push(finding('Zoning', 'verify', 'Setbacks, access and overlays not checked',
-    'Parcel area and compactness do not establish a buildable envelope or the full approval path.', SOURCES.residentialCode));
+  const dimensions = district?.status === 'Approved' && district.parcelShare >= 99.5
+    ? baseResidentialDimensions(district.code) : null;
+  obstacles.push(finding('Zoning', 'verify', 'Setbacks, access and overlays need site review',
+    dimensions
+      ? `Published base standards for ${dimensions.code}: front ${dimensions.frontFt} ft, rear ${dimensions.rearFt} ft, interior side ${dimensions.interiorSideFt}, maximum height ${dimensions.maximumHeight}. Street frontage, corner-lot rules, contextual standards and legal lot geometry are unverified; this is not a buildable-envelope calculation.`
+      : 'Parcel area and compactness do not establish a buildable envelope or the full approval path.',
+    dimensions?.source || SOURCES.residentialCode));
 
   for (const [key, title, source] of [
     ['flood', 'Mapped 1% flood hazard', SOURCES.flood],
@@ -96,6 +102,23 @@ export function getDecisionAdvice(context) {
     nextActions.push(action(2, 'Confirm historic review and Certificate of Appropriateness',
       'New exterior construction in a City-designated historic district may require Historic Review Commission approval.', SOURCES.historicReview));
   }
+  if (overlays.historicIndividual?.share > 0) {
+    obstacles.push(finding('Policy', 'confirmed', 'Individual city historic site PIN match',
+      `The individual-site map lists this PIN: ${overlays.historicIndividual.labels.join(', ')}. Confirm current designation and project scope.`, SOURCES.historic));
+    nextActions.push(action(2, 'Confirm individual historic-site review',
+      'The source PIN matches a mapped individual site; ask City Planning to confirm current designation and review requirements.', SOURCES.historicReview));
+  }
+  if (!overlays.wetlands) {
+    obstacles.push(finding('Environment', 'verify', 'NWI wetland layer unavailable',
+      sourceErrors.wetlands || 'The local wetland screening extract could not be checked.', 'https://www.fws.gov/program/national-wetlands-inventory'));
+  } else if (overlays.wetlands.share > 0) {
+    obstacles.push(finding('Environment', 'confirmed', 'NWI mapped wetland overlap',
+      `${overlays.wetlands.share.toFixed(1)}% mapped overlap. NWI is a screening map and does not establish regulated wetland boundaries.`,
+      'https://www.fws.gov/program/national-wetlands-inventory'));
+    nextActions.push(action(2, 'Confirm wetland conditions and applicable review',
+      'Have a qualified professional and relevant agency confirm site conditions before design.',
+      'https://www.fws.gov/page/national-wetlands-inventory-frequently-asked-questions'));
+  }
   obstacles.push(finding('Policy', 'verify', 'Current amendments and overlay text',
     'The city says zoning depends on both map and text, including overlays and amendments; this prototype does not resolve every current change.', SOURCES.policy));
   nextActions.push(action(2, 'Check the current zoning text and amendment hub',
@@ -111,6 +134,25 @@ export function getDecisionAdvice(context) {
       'Assessment use is not a field inspection and new construction may require removal or reuse decisions.', SOURCES.assessments));
   }
 
+  if (reviewContext?.pliNonClosed?.count > 0) {
+    obstacles.push(finding('Records', 'verify', 'PLI case statuses need review',
+      `${reviewContext.pliNonClosed.count} downloaded case records are not marked Closed; latest investigation date ${reviewContext.pliNonClosed.latestInvestigationDate || 'unknown'}. Confirm whether any case affects this proposal.`,
+      reviewContext.sources.pli));
+  }
+  if (reviewContext?.condemned) {
+    obstacles.push(finding('Records', 'verify', 'Condemned-property record matched',
+      `${reviewContext.condemned.records} downloaded records match this PIN. Inspection results include ${Object.keys(reviewContext.condemned.inspectionResults).join(', ') || 'unknown'}; confirm current status and site conditions.`,
+      reviewContext.sources.condemned));
+  }
+  if (reviewContext?.cityOwned) {
+    obstacles.push(finding('Ownership', 'verify', 'City-owned property record matched',
+      `Downloaded ownership status: ${Object.keys(reviewContext.cityOwned.statuses).join(', ') || 'unknown'}. Confirm current title and disposition process.`,
+      reviewContext.sources.cityOwned));
+  }
+
+  if (chosen.id === 'reuse') approvalPath.push(step('verify', 'Confirm the work is a repair or addition',
+    'This score treats an existing dwelling as the structure to reuse. A new building on a cleared lot is a different scenario.',
+    'Assessment use and building value; City BDA guidance', SOURCES.bda));
   approvalPath.push(step('likely', 'Start with a Building & Development Application',
     'The current City application combines the initial zoning and building reviews for new structures; agencies determine the project-specific requirements.',
     'City BDA guidance for new structures', SOURCES.bda));
@@ -141,7 +183,7 @@ export function getDecisionAdvice(context) {
   if (overlays.slope?.share >= 0.1 || overlays.undermined?.share >= 0.1) approvalPath.push(step('possible', 'Environmental overlay or engineering review',
     'Mapped slope or mined-area overlap may lead to additional site review after the City confirms the applicable overlay.',
     '§ 906.05 and § 906.08', SOURCES.environmentCode));
-  if (overlays.historic?.share >= 0.1) approvalPath.push(step('possible', 'Historic review / Certificate of Appropriateness',
+  if (overlays.historic?.share >= 0.1 || overlays.historicIndividual?.share > 0) approvalPath.push(step('possible', 'Historic review / Certificate of Appropriateness',
     'Confirm current city designation and whether the proposed exterior work needs HRC review.',
     'City historic review guidance', SOURCES.historicReview));
   approvalPath.push(step('verify', 'Confirm Pittsburgh Water connection approvals',

@@ -17,6 +17,12 @@ export const SCENARIOS = {
     permittedBases: ['RM'],
     areaBands: [500, 350, 250],
   },
+  reuse: {
+    id: 'reuse', title: 'Repair or enlarge', units: 1,
+    description: 'Repair or enlarge an existing dwelling. The use screen is still single-unit detached residential. An existing building counts as the structure to work with, not as a demolition burden.',
+    permittedBases: ['R1D', 'R1A', 'R2', 'R3', 'RM'],
+    areaBands: [250, 160, 100],
+  },
 };
 
 export const SOURCES = {

@@ -17,10 +17,11 @@ test('rejects county non-parcel labels and malformed input', () => {
 
 test('requires one exact county record and a canonical 16-character PIN', () => {
   const parsed = parseParcelId('85-N-171');
-  const valid = { properties: { PIN: '0085N00171000000', MAPBLOCKLOT: '85-N-171' } };
+  const valid = { properties: { PIN: '0085N00171000000', MAPBLOCKLOT: '85-N-171', MUNICODE: 101 } };
   const result = validateParcelMatch(parsed, [valid]);
   assert.equal(result.evidence.canonicalPIN, '0085N00171000000');
   assert.equal(result.evidence.matchedField, 'MAPBLOCKLOT');
   assert.match(validateParcelMatch(parsed, [valid, valid]).error, /multiple/);
   assert.match(validateParcelMatch(parsed, []).error, /No exact/);
+  assert.equal(validateParcelMatch(parsed, [{ ...valid, properties: { ...valid.properties, MUNICODE: 999 } }]).status, 422);
 });

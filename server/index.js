@@ -1,9 +1,12 @@
 import express from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import area from '@turf/area';
 import { intersect } from '@turf/intersect';
-import { SCENARIOS, SOURCES, scoreSite } from './score.js';
+import { SCENARIOS, SOURCES } from './score.js';
+import { scoreSiteEase } from './score-ease.js';
+import { explainScore } from './explain-score.js';
 import { getDecisionAdvice } from './decision.js';
 import { parseParcelId, validateParcelMatch } from './parcel-id.js';
 
@@ -20,6 +23,9 @@ const assessmentResource = '65855e14-549e-4992-b5be-d629afc676fa';
 const evidenceCache = new Map();
 let cityBoundaryCache = null;
 const CACHE_MS = 5 * 60 * 1000;
+const wetlandFeatures = JSON.parse(fs.readFileSync(new URL('./wetlands-pittsburgh-area.geojson', import.meta.url), 'utf8'))
+  .features.map((feature) => ({ ...feature, bbox: featureBBox(feature) }));
+const historicIndividualSites = JSON.parse(fs.readFileSync(new URL('./historic-individual-sites.json', import.meta.url), 'utf8'));
 
 function parseBBox(raw) {
   const values = String(raw || '').split(',').map(Number);
@@ -41,6 +47,10 @@ function featureBBox(feature) {
   }
   visit(feature.geometry.coordinates);
   return bounds;
+}
+
+function boxesIntersect(first, second) {
+  return first[0] <= second[2] && first[2] >= second[0] && first[1] <= second[3] && first[3] >= second[1];
 }
 
 function perimeterMeters(geometry) {
@@ -111,6 +121,7 @@ async function lookupAssessment(pin) {
   return record ? {
     parid: record.PARID || null,
     useDescription: record.USEDESC || null,
+    fairMarketBuilding: record.FAIRMARKETBUILDING ?? null,
     lotAreaSqFt: record.LOTAREA ?? null,
     asOfDate: record.ASOFDATE || null,
     multipleRecords: data.result.total > 1,
@@ -163,7 +174,7 @@ async function resolveParcel(parsed) {
   }, 10);
   if (data.truncated) throw httpError(409, 'This ID has too many county matches; use a full PIN.');
   const result = validateParcelMatch(parsed, data.features);
-  if (result.error) throw httpError(data.features.length ? 409 : 404, result.error);
+  if (result.error) throw httpError(result.status || (data.features.length ? 409 : 404), result.error);
   return result;
 }
 
@@ -186,7 +197,7 @@ async function fetchSiteEvidence(parsed) {
     flood: queryArcGIS(floodService, { ...spatialQuery, where: "SFHA_TF='T'", outFields: 'FLD_ZONE,ZONE_SUBTY,SFHA_TF' }, 1000),
     slope: queryArcGIS(slopeService, { ...spatialQuery, outFields: 'slope25' }, 1000),
     undermined: queryArcGIS(underminedService, { ...spatialQuery, outFields: 'undermined' }, 1000),
-    historic: queryArcGIS(historicService, { ...spatialQuery, outFields: 'type,historic_name' }, 1000),
+    historic: queryArcGIS(historicService, { ...spatialQuery, where: "type='CHD'", outFields: 'type,historic_name' }, 1000),
     assessment: lookupAssessment(idEvidence.canonicalPIN),
   };
   const names = Object.keys(requests);
@@ -211,6 +222,19 @@ async function fetchSiteEvidence(parsed) {
       catch (error) { sourceErrors[name] = `GIS geometry could not be intersected: ${error.message}`; }
     }
   }
+  try {
+    const bbox = featureBBox(parcel);
+    overlays.wetlands = overlapSummary(parcel,
+      wetlandFeatures.filter((feature) => boxesIntersect(bbox, feature.bbox)), parcelArea, 'WETLAND_TYPE');
+  } catch (error) {
+    overlays.wetlands = null;
+    sourceErrors.wetlands = `Local NWI screening geometry could not be intersected: ${error.message}`;
+  }
+  overlays.historicIndividual = {
+    share: historicIndividualSites[idEvidence.canonicalPIN] ? 100 : 0,
+    labels: historicIndividualSites[idEvidence.canonicalPIN] ?? [],
+    match: 'exact-PIN',
+  };
   idEvidence.assessmentPARID = data.assessment?.parid || null;
   idEvidence.assessmentJoin = sourceErrors.assessment ? 'source-unavailable'
     : data.assessment?.parid === idEvidence.canonicalPIN ? 'exact-PARID-match' : 'no-assessment-record';
@@ -248,16 +272,37 @@ function cleanPolicy(raw = {}) {
 }
 
 function scoreEvidence(evidence, scenario, policy = {}) {
-  return scoreSite({
+  return scoreSiteEase({
     areaSqM: evidence.parcel.areaSqM,
     compactness: evidence.parcel.compactness,
     districts: evidence.districts,
     flood: evidence.overlays.flood,
     slope: evidence.overlays.slope,
     undermined: evidence.overlays.undermined,
+    historic: evidence.overlays.historic,
+    historicIndividual: evidence.overlays.historicIndividual,
+    wetlands: evidence.overlays.wetlands,
+    assessment: evidence.assessment,
     scenario,
     policy,
   });
+}
+
+function easeExplanation(evidence, scenario) {
+  const midpoint = (score) => (score.minimum + score.maximum) / 2;
+  const current = scoreEvidence(evidence, scenario);
+  const alternatives = Object.values(SCENARIOS).filter((entry) => entry.id !== scenario).map((entry) => ({
+    id: entry.id,
+    title: entry.title,
+    midpoint: midpoint(scoreEvidence(evidence, entry.id)),
+  }));
+  const policies = [
+    ['allowResidentialUse', 'Allow this use in the residential district', { allowResidentialUse: true }],
+    ['reduceMinimumLot', 'Reduce the published lot minimum by 20%', { reduceMinimumLot: true }],
+  ].map(([id, label, policy]) => ({
+    id, label, pointGain: midpoint(scoreEvidence(evidence, scenario, policy)) - midpoint(current),
+  }));
+  return explainScore(current, { alternatives, policies });
 }
 
 function buildEvaluation(evidence, scenario, interventions = {}) {
@@ -267,6 +312,7 @@ function buildEvaluation(evidence, scenario, interventions = {}) {
   const hasPolicy = Object.values(policy).some(Boolean);
   const hypothetical = hasPolicy ? scoreEvidence(evidence, scenario, policy) : null;
   const hypotheticalDecision = hypothetical ? getDecisionAdvice({ ...evidence, scenario, score: hypothetical, policy }) : null;
+  const explanation = easeExplanation(evidence, scenario);
   const policyImpact = hypothetical ? {
     intervention: policy,
     baseline: { displayRange: score.displayRange, minimum: score.minimum, maximum: score.maximum, status: score.status },
@@ -277,7 +323,7 @@ function buildEvaluation(evidence, scenario, interventions = {}) {
     utilityUnknownsAssumedResolved: policy.assumeUtilityCapacity ? 1 : 0,
     hypotheticalDecision,
   } : null;
-  return { ...evidence, scenario: SCENARIOS[scenario], score, decision, policyImpact, sources: SOURCES };
+  return { ...evidence, scenario: SCENARIOS[scenario], score, decision, explanation, policyImpact, sources: SOURCES };
 }
 
 function handleError(response, error) {
