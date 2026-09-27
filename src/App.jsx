@@ -22,9 +22,9 @@ const DOWNTOWN = [40.4385, -79.9972];
 const MIN_PARCEL_ZOOM = 16;
 
 function zoningColor(properties = {}) {
-  const code = String(properties.zon_new || '').toUpperCase();
-  if (code.startsWith('R')) return '#6f9e8d';
-  if (code === 'H' || code === 'P' || code.startsWith('SP')) return '#b4a88e';
+  const category = String(properties.legendtype || '').trim().toLowerCase();
+  if (category.includes('residential')) return '#6f9e8d';
+  if (category.includes('planned') || category.includes('parks') || category.includes('hillside') || category.includes('public realm')) return '#b4a88e';
   return '#b7929a';
 }
 
@@ -53,7 +53,7 @@ export default function App() {
   const selectedLayer = useRef(null);
   const parcelRequest = useRef(null);
   const zoningRequest = useRef(null);
-  const pointRequest = useRef(null);
+  const parcelZoningRequest = useRef(null);
   const selectedCard = useRef(null);
 
   const [query, setQuery] = useState('');
@@ -69,29 +69,26 @@ export default function App() {
     if (selected?.pin) selectedCard.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [selected?.pin]);
 
-  const selectParcel = useCallback(async (feature, clickedAt) => {
+  const selectParcel = useCallback(async (feature) => {
     const currentMap = map.current;
     if (!currentMap || !feature) return;
-    pointRequest.current?.abort();
+    parcelZoningRequest.current?.abort();
     selectedLayer.current.clearLayers();
     L.geoJSON(feature, {
       style: { color: '#df6b3b', weight: 3, fillColor: '#e8a07d', fillOpacity: 0.22 },
       interactive: false,
     }).addTo(selectedLayer.current);
 
-    const bounds = L.geoJSON(feature).getBounds();
-    const point = clickedAt || bounds.getCenter();
     const properties = feature.properties || {};
     const pin = properties.PIN || properties.MAPBLOCKLOT || 'Unknown parcel';
-    setSelected({ pin, properties, zoning: null, zoningLoading: true });
+    setSelected({ pin, properties, districts: [], zoningLoading: true });
     setNotice('');
 
     const controller = new AbortController();
-    pointRequest.current = controller;
+    parcelZoningRequest.current = controller;
     try {
-      const data = await getJSON(`/api/zoning-at?lon=${point.lng}&lat=${point.lat}`, controller.signal);
-      const zoning = data.features[0]?.properties || null;
-      setSelected((previous) => previous?.pin === pin ? { ...previous, zoning, zoningLoading: false } : previous);
+      const data = await getJSON(`/api/parcel-zoning?pin=${encodeURIComponent(pin)}`, controller.signal);
+      setSelected((previous) => previous?.pin === pin ? { ...previous, districts: data.districts, zoningLoading: false } : previous);
     } catch (error) {
       if (error.name !== 'AbortError') {
         setSelected((previous) => previous?.pin === pin ? { ...previous, zoningLoading: false, zoningError: true } : previous);
@@ -124,7 +121,7 @@ export default function App() {
     return () => {
       parcelRequest.current?.abort();
       zoningRequest.current?.abort();
-      pointRequest.current?.abort();
+      parcelZoningRequest.current?.abort();
       instance.remove();
       map.current = null;
     };
@@ -155,7 +152,7 @@ export default function App() {
           onEachFeature: (feature, layer) => {
             layer.on('mouseover', () => layer.setStyle({ color: '#dc6838', weight: 2.2, fillOpacity: 0.26 }));
             layer.on('mouseout', () => layer.setStyle({ color: '#365d57', weight: 1.25, fillOpacity: 0.14 }));
-            layer.on('click', (event) => selectParcel(feature, event.latlng));
+            layer.on('click', () => selectParcel(feature));
           },
         }).addTo(parcelLayer.current);
         setParcelCount(data.features.length);
@@ -229,7 +226,7 @@ export default function App() {
   }
 
   function clearSelection() {
-    pointRequest.current?.abort();
+    parcelZoningRequest.current?.abort();
     selectedLayer.current?.clearLayers();
     setSelected(null);
   }
@@ -242,6 +239,12 @@ export default function App() {
   const areaLabel = Number.isFinite(acreage) && acreage > 0
     ? `${acreage.toLocaleString('en-US', { maximumFractionDigits: 3 })} ac · ${Math.round(acreage * 4046.856).toLocaleString('en-US')} m²`
     : 'Area unavailable';
+  const districts = selected?.districts || [];
+  const districtShare = districts.reduce((total, district) => total + district.parcelShare, 0);
+  const zoningReviewReasons = [];
+  if (districts.length > 1) zoningReviewReasons.push('This parcel crosses multiple zoning districts');
+  if (districts.some((district) => district.status !== 'Approved')) zoningReviewReasons.push('a GIS status is pending or not recorded');
+  if (districts.length > 0 && (districtShare < 99.5 || districtShare > 100.5)) zoningReviewReasons.push('the GIS boundaries do not align fully');
 
   return (
     <div className="app-shell">
@@ -263,7 +266,13 @@ export default function App() {
           <div className="sidebar-content">
             <div className="eyebrow"><span>01</span> SITE EXPLORATION <ArrowDownRight size={16} /></div>
             <h1>Start with<br /><em>a parcel.</em></h1>
-            <p className="intro-copy">Find a real parcel, explore its boundaries and zoning, then start assessing development feasibility.</p>
+            <p className="intro-copy">Find a real parcel and examine the site evidence for a small housing project.</p>
+
+            <section className="scenario-card" aria-label="Selected development scenario">
+              <div className="scenario-top"><span>ACTIVE SCENARIO</span><span>01 / SITE SCREEN</span></div>
+              <strong>Small residential infill</strong>
+              <p>Explore a parcel for a small new housing project. Unit count, design, and permitted use still need review.</p>
+            </section>
 
             <form className="search-box" onSubmit={searchParcel}>
               <label htmlFor="parcel-search">SEARCH PARCEL ID</label>
@@ -302,12 +311,24 @@ export default function App() {
                     <div><span>Parcel area</span><strong>{areaLabel}</strong></div>
                   </div>
                   <div className="zone-result">
-                    <span>Zoning at selected point</span>
-                    {selected.zoningLoading ? <strong className="muted">Checking…</strong> : selected.zoning ? (
-                      <div className="zone-value"><b>{selected.zoning.zon_new || '—'}</b><strong>{selected.zoning.full_zoning_type || 'Zoning name unavailable'}</strong></div>
-                    ) : <strong className="muted">{selected.zoningError ? 'Zoning lookup failed' : 'No match; this parcel may be outside Pittsburgh'}</strong>}
+                    <span>Zoning across the parcel</span>
+                    {selected.zoningLoading ? <strong className="muted">Checking parcel boundaries…</strong> : selected.zoningError ? (
+                      <strong className="muted">Zoning overlay failed. Please try this parcel again.</strong>
+                    ) : districts.length ? (
+                      <>
+                        {districts.map((district) => (
+                          <div className="zone-district" key={`${district.code}-${district.status || 'unknown'}`}>
+                            <div className="zone-district-top"><b>{district.code}</b><strong>{district.parcelShare < 0.1 ? '<0.1' : district.parcelShare.toFixed(1)}% of parcel</strong></div>
+                            <span>{district.name || 'Zoning name unavailable'}</span>
+                            <div className="zone-share-track"><span style={{ width: `${Math.min(100, district.parcelShare)}%` }} /></div>
+                            <small>GIS status: {district.status || 'not recorded'}</small>
+                          </div>
+                        ))}
+                        {zoningReviewReasons.length > 0 && <p className="review-flag">Review needed: {zoningReviewReasons.join('; ')}.</p>}
+                      </>
+                    ) : <strong className="muted">No city zoning overlap found; this parcel may be outside Pittsburgh.</strong>}
                   </div>
-                  <p className="card-footnote">Point-based screening only. A parcel may span multiple districts and requires further review.</p>
+                  <p className="card-footnote">Shares estimate the area where county parcel and city zoning polygons overlap. This does not establish a permitted use or approval.</p>
                 </div>
               ) : (
                 <div className="empty-selection"><MousePointer2 size={22} strokeWidth={1.4} /><p>Zoom in and select a parcel<br />to see its ID and zoning</p></div>

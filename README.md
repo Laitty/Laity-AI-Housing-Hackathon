@@ -1,6 +1,6 @@
 # Parcel Atlas · Pittsburgh Site Explorer
 
-An early Track 1 prototype for the AI for Housing Hackathon. Explore Allegheny County parcel boundaries and City of Pittsburgh zoning on one interactive map. Select or search for a parcel to see its ID, recorded area, and the zoning district at the selected point.
+An early Track 1 prototype for the AI for Housing Hackathon. The current scenario screens a parcel for **small residential infill**. Explore Allegheny County parcel boundaries and City of Pittsburgh zoning on one interactive map. Select or search for a parcel to see its ID, recorded area, and every city zoning polygon that overlaps its boundary.
 
 ## Run locally
 
@@ -32,13 +32,14 @@ The parcel dataset page's PASDA map service returned “service not started” d
 
 - City overview and downtown example buttons
 - Parcel and zoning layer toggles
-- Viewport-based parcel loading; click a parcel for its ID, area, and point-based zoning lookup
+- Viewport-based parcel loading; click a parcel for its ID, area, and parcel-wide zoning intersections
 - Search by full PIN or county block/lot ID
+- Estimated share of the parcel in each intersecting district, source GIS status, and review flags for multiple districts, uncertain status, or coverage mismatch
 - Loading and error states, plus a responsive layout
 
 ## Interpretation and limitations
 
-The displayed zoning district comes from a **point lookup** at the clicked location (or the selected parcel's map bounds center after search). A parcel may cross multiple zoning districts. The map alone does not establish permitted uses, overlay rules, exceptions, or permit eligibility. Verify important findings against the current [Pittsburgh Zoning Code](https://www.pittsburghpa.gov/Business-Development/City-Planning/Zoning) and the responsible city office. This stage does not generate a Development Ease Score or make a permit determination.
+Zoning shares are estimated by intersecting the county parcel polygon with city zoning polygons. Map colors are simplified groups of the city's `legendtype` values, not official zoning categories. The city layer has a `status` field, which is displayed as recorded, including `Pending` or missing values; that field alone is not a legal determination. County recorded acreage and the geometry-derived area may differ. The current small residential infill scenario does not assume a unit count, building design, or permitted use. The map does not establish overlay rules, exceptions, infrastructure capacity, or permit eligibility. Verify important findings against the current [Pittsburgh Zoning Code](https://www.pittsburghpa.gov/Business-Development/City-Planning/Zoning) and the responsible city office. This stage does not generate a Development Ease Score or make a permit determination.
 
 ## AI use disclosure
 

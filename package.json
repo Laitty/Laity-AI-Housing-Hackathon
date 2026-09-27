@@ -11,6 +11,8 @@
     "start": "node server/index.js"
   },
   "dependencies": {
+    "@turf/area": "^7.4.0",
+    "@turf/intersect": "^7.4.0",
     "express": "^5.1.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.468.0",
