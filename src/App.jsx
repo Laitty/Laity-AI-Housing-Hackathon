@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import {
   ArrowDownRight,
@@ -107,9 +107,10 @@ const REPORT_TABS = [
   { id: 'actions', label: 'Actions' },
 ];
 
-function FloatingReport({ label, onClose, mapAreaRef, comparisonExpanded, children }) {
+function FloatingReport({ label, onClose, mapAreaRef, mapRef, parcelBounds, comparisonExpanded, children }) {
   const sheetRef = useRef(null);
   const interaction = useRef(null);
+  const manuallyPlaced = useRef(false);
   const [geometry, setGeometry] = useState(null);
 
   const availableHeight = useCallback(() => {
@@ -131,13 +132,76 @@ function FloatingReport({ label, onClose, mapAreaRef, comparisonExpanded, childr
     };
   }, [mapAreaRef, availableHeight]);
 
-  useEffect(() => {
+  const positionNearParcel = useCallback(() => {
+    const currentMap = mapRef.current;
+    const sheet = sheetRef.current;
+    if (!currentMap || !sheet || !parcelBounds || window.matchMedia('(max-width: 960px)').matches) return null;
+    const northWest = currentMap.latLngToContainerPoint(parcelBounds.getNorthWest());
+    const southEast = currentMap.latLngToContainerPoint(parcelBounds.getSouthEast());
+    const parcel = {
+      left: Math.min(northWest.x, southEast.x), right: Math.max(northWest.x, southEast.x),
+      top: Math.min(northWest.y, southEast.y), bottom: Math.max(northWest.y, southEast.y),
+    };
+    const width = sheet.offsetWidth;
+    const height = sheet.offsetHeight;
+    const centerX = (parcel.left + parcel.right) / 2;
+    const centerY = (parcel.top + parcel.bottom) / 2;
+    const gap = 20;
+    const candidates = [
+      { left: parcel.right + gap, top: centerY - height / 2 },
+      { left: parcel.left - width - gap, top: centerY - height / 2 },
+      { left: centerX - width / 2, top: parcel.bottom + gap },
+      { left: centerX - width / 2, top: parcel.top - height - gap },
+    ];
+    let best = null;
+    let smallestOverlap = Infinity;
+    for (const candidate of candidates) {
+      const placed = keepInsideMap({ ...candidate, width, height });
+      const overlapWidth = Math.max(0, Math.min(placed.left + placed.width, parcel.right + 8) - Math.max(placed.left, parcel.left - 8));
+      const overlapHeight = Math.max(0, Math.min(placed.top + placed.height, parcel.bottom + 8) - Math.max(placed.top, parcel.top - 8));
+      const overlap = overlapWidth * overlapHeight;
+      if (overlap < smallestOverlap) {
+        best = placed;
+        smallestOverlap = overlap;
+      }
+      if (overlap === 0) break;
+    }
+    return best;
+  }, [mapRef, parcelBounds, keepInsideMap]);
+
+  useLayoutEffect(() => {
     if (!mapAreaRef.current) return;
-    const observer = new ResizeObserver(() => setGeometry((current) => current && keepInsideMap(current)));
+    const updatePosition = () => setGeometry((current) => {
+      if (manuallyPlaced.current) return current && keepInsideMap(current);
+      if (window.matchMedia('(max-width: 960px)').matches) return null;
+      return positionNearParcel() || (current && keepInsideMap(current));
+    });
+    const observer = new ResizeObserver(updatePosition);
     observer.observe(mapAreaRef.current);
-    setGeometry((current) => current && keepInsideMap(current));
+    updatePosition();
     return () => observer.disconnect();
-  }, [mapAreaRef, keepInsideMap]);
+  }, [mapAreaRef, keepInsideMap, positionNearParcel]);
+
+  useEffect(() => {
+    const currentMap = mapRef.current;
+    if (!currentMap || !parcelBounds) return;
+    let frame;
+    const followParcel = () => {
+      if (manuallyPlaced.current) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const next = positionNearParcel();
+        if (next) setGeometry((current) => current && Math.abs(current.left - next.left) < 1 && Math.abs(current.top - next.top) < 1 ? current : next);
+      });
+    };
+    currentMap.on('move', followParcel);
+    currentMap.on('moveend', followParcel);
+    return () => {
+      currentMap.off('move', followParcel);
+      currentMap.off('moveend', followParcel);
+      cancelAnimationFrame(frame);
+    };
+  }, [mapRef, parcelBounds, positionNearParcel]);
 
   useEffect(() => () => interaction.current?.cleanup?.(), []);
 
@@ -151,6 +215,7 @@ function FloatingReport({ label, onClose, mapAreaRef, comparisonExpanded, childr
     if (event.button !== 0 || event.target.closest('.parcel-sheet-close')) return;
     event.preventDefault();
     event.stopPropagation();
+    manuallyPlaced.current = true;
     const start = keepInsideMap(currentGeometry());
     const onMove = (moveEvent) => moveInteraction(moveEvent);
     const onEnd = (endEvent) => endInteraction(endEvent);
@@ -192,6 +257,7 @@ function FloatingReport({ label, onClose, mapAreaRef, comparisonExpanded, childr
     const directions = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
     if (!directions[event.key]) return;
     event.preventDefault();
+    manuallyPlaced.current = true;
     const [x, y] = directions[event.key];
     const amount = event.shiftKey ? 40 : 10;
     const start = geometry || currentGeometry();
@@ -367,6 +433,7 @@ export default function App() {
   const cityBounds = useRef(L.latLngBounds(CITY_BOUNDS));
   const parcelLayer = useRef(null);
   const selectedLayer = useRef(null);
+  const selectionSerial = useRef(0);
   const parcelRequest = useRef(null);
   const parcelZoningRequest = useRef(null);
   const scenarioRef = useRef('duplex');
@@ -458,6 +525,7 @@ export default function App() {
     const currentMap = map.current;
     if (!currentMap || !feature) return;
     selectedRef.current = feature.properties?.PIN || feature.properties?.MAPBLOCKLOT || true;
+    const parcelBounds = L.geoJSON(feature).getBounds();
     focusParcel(feature);
     parcelZoningRequest.current?.abort();
     selectedLayer.current.clearLayers();
@@ -465,7 +533,7 @@ export default function App() {
       style: { color: '#1769d2', weight: 3, fillColor: '#7cb5f5', fillOpacity: 0.22 },
       interactive: false,
     }).addTo(selectedLayer.current);
-    L.marker(L.geoJSON(feature).getBounds().getCenter(), {
+    L.marker(parcelBounds.getCenter(), {
       icon: L.divIcon({ className: 'parcel-focus-marker', html: '<span></span>', iconSize: [28, 28], iconAnchor: [14, 14] }),
       interactive: false,
     }).addTo(selectedLayer.current);
@@ -475,7 +543,7 @@ export default function App() {
     const lookupId = requestedId || pin;
     setDetailsOpen(false);
     setEstimate(null);
-    setSelected({ pin, lookupId, properties, districts: [], zoningLoading: true });
+    setSelected({ pin, lookupId, properties, parcelBounds, selectionId: ++selectionSerial.current, districts: [], zoningLoading: true });
     setNotice('');
 
     const controller = new AbortController();
@@ -836,7 +904,7 @@ export default function App() {
           {boundaryStatus !== 'loading' && zoom < MIN_PARCEL_ZOOM && !selected && <div className="zoom-hint"><span className="hint-icon"><MousePointer2 size={17} /></span><span><strong>Explore Pittsburgh</strong><small>Search a parcel ID or zoom in to select a site</small></span><ChevronRight size={16} /></div>}
           <div className="map-bottom-left"><span className="status-pulse" /><span>{loading.parcels ? 'Loading parcel boundaries' : zoom >= MIN_PARCEL_ZOOM ? `${parcelCount.toLocaleString()} parcels in view` : 'Pittsburgh overview · zoom in for parcel boundaries'}</span><span className="status-divider" /> <span>ZOOM {zoom}</span></div>
           <div className="map-north">N <span>↑</span></div>
-          {selected && <FloatingReport key={selected.pin} label={selected.properties.MAPBLOCKLOT || selected.pin} onClose={clearSelection} mapAreaRef={mapArea} comparisonExpanded={comparisonExpanded}>
+          {selected && <FloatingReport key={selected.selectionId} label={selected.properties.MAPBLOCKLOT || selected.pin} onClose={clearSelection} mapAreaRef={mapArea} mapRef={map} parcelBounds={selected.parcelBounds} comparisonExpanded={comparisonExpanded}>
             {selected.zoningLoading && selected.evaluation?.scenario.id !== scenario && <div className="report-loading" role="status"><span className="report-loading-label"><span className="tiny-spinner" /> Checking zoning, site conditions, and source records…</span><span className="skeleton-line skeleton-wide" /><span className="skeleton-line skeleton-mid" /></div>}
             {selected.zoningError && selected.evaluation?.scenario.id !== scenario && <p className="source-warning report-error">{selected.zoningError}</p>}
             {selected.evaluation?.scenario.id === scenario && <CompactScore evaluation={selected.evaluation} onShowDetails={showFullReport} />}
