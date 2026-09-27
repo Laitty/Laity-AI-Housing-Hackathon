@@ -462,7 +462,7 @@ export default function App() {
     parcelZoningRequest.current?.abort();
     selectedLayer.current.clearLayers();
     L.geoJSON(feature, {
-      style: { color: '#df6b3b', weight: 3, fillColor: '#e8a07d', fillOpacity: 0.22 },
+      style: { color: '#1769d2', weight: 3, fillColor: '#7cb5f5', fillOpacity: 0.22 },
       interactive: false,
     }).addTo(selectedLayer.current);
     L.marker(L.geoJSON(feature).getBounds().getCenter(), {
@@ -564,12 +564,12 @@ export default function App() {
       const rings = cityMaskRings(data);
       if (rings.length < 2) throw new Error('No usable city boundary polygons were returned');
       cityMaskShape.current = L.polygon(rings, {
-        pane: 'cityMask', stroke: false, fillColor: '#f5f7f4', fillOpacity: 1,
+        pane: 'cityMask', stroke: false, fillColor: '#f4f7fb', fillOpacity: 1,
         fillRule: 'evenodd', interactive: false,
       });
       if (instance.getZoom() < MIN_ZONING_ZOOM && !selectedRef.current) cityMaskShape.current.addTo(cityMaskLayer.current);
       const outline = L.geoJSON(data, {
-        style: { color: '#354d42', weight: 2.5, opacity: 0.9, fillOpacity: 0 },
+        style: { color: '#4b6482', weight: 2.5, opacity: 0.9, fillOpacity: 0 },
         interactive: false,
       }).addTo(cityBoundaryLayer.current);
       if (outline.getBounds().isValid()) cityBounds.current = outline.getBounds();
@@ -621,11 +621,11 @@ export default function App() {
       getJSON(`/api/parcels?bbox=${bbox}`, controller.signal).then((data) => {
         if (controller.signal.aborted) return;
         parcelLayer.current.clearLayers();
-        const parcelStyle = { color: '#29322e', weight: currentZoom >= 18 ? 2.2 : currentZoom >= 17 ? 1.95 : 1.65, opacity: .94, fillColor: '#f3f1e8', fillOpacity: .04, lineJoin: 'round' };
+        const parcelStyle = { color: '#202a37', weight: currentZoom >= 18 ? 2.2 : currentZoom >= 17 ? 1.95 : 1.65, opacity: .94, fillColor: '#f4f7fb', fillOpacity: .04, lineJoin: 'round' };
         L.geoJSON(data, {
           style: parcelStyle,
           onEachFeature: (feature, layer) => {
-            layer.on('mouseover', () => layer.setStyle({ color: '#ba7654', weight: parcelStyle.weight + .9, fillOpacity: .2 }));
+            layer.on('mouseover', () => layer.setStyle({ color: '#1769d2', weight: parcelStyle.weight + .9, fillOpacity: .2 }));
             layer.on('mouseout', () => layer.setStyle(parcelStyle));
             layer.on('click', () => selectParcel(feature));
           },
