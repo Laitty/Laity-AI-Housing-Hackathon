@@ -153,7 +153,7 @@ a { color: inherit; }
 .decision-provider { color: #99a49a; font-size: 9px; }
 
 .map-area { position: relative; min-width: 0; min-height: 0; background: #e8ece7; overflow: hidden; }
-.comparison-board { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1050; min-width: 0; height: 62px; overflow: hidden; background: rgba(246, 250, 244, .96); border-top: 1px solid #b6cbb9; box-shadow: 0 -12px 36px rgba(32, 65, 47, .12); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); transition: height .35s cubic-bezier(.2,.8,.2,1); }
+.comparison-board { position: absolute; left: calc(var(--sidebar-width, 390px) + 10px); right: 0; bottom: 0; z-index: 1050; min-width: 0; height: 62px; overflow: hidden; background: rgba(246, 250, 244, .96); border-top: 1px solid #b6cbb9; box-shadow: 0 -12px 36px rgba(32, 65, 47, .12); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); transition: height .35s cubic-bezier(.2,.8,.2,1); }
 .comparison-board.expanded { height: min(310px, 55vh); }
 .comparison-header { height: 61px; padding: 9px 20px; }
 .comparison-header-actions { display: flex; align-items: center; gap: 8px; }
@@ -231,7 +231,7 @@ a { color: inherit; }
   .map-top-right button { padding: 8px 9px; font-size: 10px; }
   .map-bottom-left { left: 12px; bottom: 12px; font-size: 9px; }
   .leaflet-control-zoom { margin-right: 12px !important; margin-bottom: 12px !important; }
-  .comparison-board { position: fixed; }
+  .comparison-board { position: fixed; left: 0; }
   .comparison-board.expanded { height: min(310px, 48vh); }
   .comparison-header { padding: 8px 13px; }
   .comparison-header span { font-size: 8px; }
