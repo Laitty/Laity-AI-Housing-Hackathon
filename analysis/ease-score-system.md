@@ -35,7 +35,7 @@ The nine items sum to 100. A by-right use scores 28. A by-right four-unit buildi
 | Mapped slope of 25% or more | 6 | Same bands |
 | Undermined area | 4 | Same bands |
 | Mapped wetland | 2 | Same bands |
-| Water and sewer capacity | 15 | Unknown on every parcel |
+| Water and sewer capacity | 15 | Unknown in the rules range. The screened range may count a partial nearby estimate, capped at 10 |
 
 The existing-building item has two directions, so vacant land and an existing house are not scored the same way twice:
 
@@ -137,6 +137,6 @@ ZIP 15213 is the only area with published scores. Every other area is empty.
 | 15213 | Scored | [analysis/ease-15213.jsonl](ease-15213.jsonl) |
 | Every other ZIP or neighborhood | Empty | None |
 
-The 15213 file has 6,127 parcels that matched a county parcel boundary, and four housing types for each, 24,508 rows. Fifteen assessment records in that ZIP had no parcel geometry and are omitted. Each row has the rules range, the screened range, one placed integer, the nine item scores, and a reading. The reading is assembled from this file’s rules. No model wrote it. Nearby water and sewer checks were not run for this file, so those 15 points stay open.
+The 15213 file has 6,127 parcels that matched a county parcel boundary, and four housing types for each, 24,508 rows. Fifteen assessment records in that ZIP had no parcel geometry and are omitted. Each row has the rules range, the screened range, one placed integer, the nine item scores, and a reading. The reading is assembled from this file’s rules. No model wrote it. Water and sewer uses the eight nearest city parcels inside the padded parcel box and the same assessment file. 5,847 parcels had at least four assessed neighbors and at least half non-vacant, so they receive 5–10 of the 15 points. The other 280 parcels leave all 15 open. The points never reach 15, because nearby houses are not a capacity record.
 
 A later model may generate readings for areas that are still empty. It should read this file as the scoring standard. It may rewrite the reading. It must not change a known item, the rules range, the screened range, or the placed integer. Until that connection exists, those areas stay empty.

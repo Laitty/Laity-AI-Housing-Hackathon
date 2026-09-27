@@ -37,7 +37,7 @@ The selected parcel panel displays input, matched county field/value, canonical 
 
 The same parcel receives a separate 0–100 range for each housing type. The lower bound is the sum of known item scores. Unknown items widen the upper bound, and the range stays visible. The midpoint is used only for ranking and comparison. A screened range can narrow unknown items from the parcel’s own zoning map. Published lot minimums come from [§ 903.03](https://ecode360.com/45474194). Full rules, checks, and backtest numbers are in [analysis/ease-score-system.md](analysis/ease-score-system.md).
 
-ZIP 15213 is the worked example: [analysis/ease-15213.jsonl](analysis/ease-15213.jsonl) has the rules range, screened range, placed integer, and a rules reading for 6,127 parcels. Every other area is empty. A later model may write those readings from the rules file. It must not change the scores.
+ZIP 15213 is the worked example: [analysis/ease-15213.jsonl](analysis/ease-15213.jsonl) has the rules range, screened range, placed integer, and a rules reading for 6,127 parcels. Nearby water and sewer is included in that screened range: 5,847 parcels receive 5–10 of the 15 points, and 280 leave all 15 open. The count never reaches 15, because nearby houses are not a capacity record. Every other area is empty. A later model may write those readings from the rules file. It must not change the scores.
 
 | Factor | Points | Rule |
 | --- | ---: | --- |
@@ -49,7 +49,7 @@ ZIP 15213 is the worked example: [analysis/ease-15213.jsonl](analysis/ease-15213
 | ≥25% slope | 6 | Intersect parcel with city steep-slope polygons. |
 | Undermined area | 4 | Intersect parcel with city undermined-area polygons. |
 | NWI wetland | 2 | Intersect parcel with the local National Wetlands Inventory extract. |
-| Water and sewer capacity | 15 | Always unknown. No parcel-level capacity source is available, so this item widens every score and does not rank sites. |
+| Water and sewer capacity | 15 | Unknown in the rules range. No parcel-level capacity record exists, so these 15 points do not rank sites. The screened range may count a partial nearby estimate, capped at 10. |
 
 Environmental factors score full points for <1% mapped overlap, about 70% for 1–<10%, about 40% for 10–<50%, and 0 for ≥50%. A failed query is unknown, never a clean site. Historic designation, tax delinquency, foreclosure, and city ownership stay review flags. Compactness and road-centerline distance are not in the score. Each response includes `explanation`: the largest known point gap, and the housing type or policy change with the largest midpoint gain. Those sentences are assembled from the score items.
 

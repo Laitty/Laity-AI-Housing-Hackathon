@@ -9,7 +9,8 @@
       "rows": 24508,
       "file": "analysis/ease-15213.jsonl",
       "readings": "rules",
-      "waterAndSewerNearby": false
+      "waterAndSewerNearby": true,
+      "parcelsWithWaterAndSewerEstimate": 5847
     }
   },
   "otherAreas": null,
