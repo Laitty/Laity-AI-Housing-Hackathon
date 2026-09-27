@@ -54,6 +54,27 @@ function scoreLabel(score) {
   return score.minimum === score.maximum ? String(score.minimum) : `${score.minimum}–${score.maximum}`;
 }
 
+function rangeText(minimum, maximum) {
+  return minimum === maximum ? String(minimum) : `${minimum}–${maximum}`;
+}
+
+function ScoreHeadline({ score, estimate, large = false }) {
+  const ready = estimate?.status === 'ready' ? estimate.result : null;
+  const point = ready?.agent?.point;
+  const rules = ready ? rangeText(ready.rulesMinimum, ready.rulesMaximum) : scoreLabel(score);
+  const screened = ready
+    ? rangeText(ready.estimatedMinimum, ready.estimatedMaximum)
+    : estimate?.status === 'failed' ? 'Unavailable' : '…';
+  return <div className={`score-headline ${large ? 'large' : ''} ${score?.displayRange ? '' : 'needs-review'}`}>
+    <span className="score-headline-kicker">AI estimate</span>
+    <div className="score-headline-point"><strong>{point != null ? point : '…'}</strong>{point != null && <span>/ 100</span>}</div>
+    <p><b>Screened range</b> {screened}</p>
+    <p><b>Rules range</b> {rules}</p>
+    {ready?.agent?.provider === 'session-placement' && <small>Placed on this machine. The remote model was not called.</small>}
+    {estimate?.status === 'failed' && <small>{estimate.error}</small>}
+  </div>;
+}
+
 function EvidenceList({ title, entries, ordered = false }) {
   const Tag = ordered ? 'ol' : 'ul';
   return <section className="evidence-section">
@@ -285,13 +306,12 @@ function FloatingReport({ label, onClose, mapAreaRef, mapRef, parcelBounds, comp
   </aside>;
 }
 
-function CompactScore({ evaluation, onShowDetails }) {
+function CompactScore({ evaluation, estimate, onShowDetails }) {
   const { score, explanation, scenario } = evaluation;
   const summary = explanation?.summary?.split('. ')[0];
   return <div className="compact-score">
     <span className="compact-score-kicker">DEVELOPMENT EASE · {scenario.title.toUpperCase()}</span>
-    <div className={`compact-score-value ${score.displayRange ? '' : 'needs-review'}`}><strong>{scoreLabel(score)}</strong>{score.displayRange && <span>/ 100</span>}</div>
-    <p className="compact-score-status">{score.status}</p>
+    <ScoreHeadline score={score} estimate={estimate} large />
     <p className="compact-score-summary">{summary ? `${summary.replace(/\.$/, '')}.` : 'This site needs a closer look before drawing a development conclusion.'}</p>
     <button className="compact-score-details" type="button" onClick={onShowDetails}>View full details <ArrowUpRight size={16} /></button>
   </div>;
@@ -328,8 +348,8 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, 
     <div id="report-tab-panel" role="tabpanel" aria-labelledby={`report-tab-${activeTab}`} className="report-tab-panel" key={activeTab}>
       {activeTab === 'overview' && <>
         <div className="evaluation-heading"><span>DEVELOPMENT EASE · PROTOTYPE</span><small>{evaluation.scenario.title.toUpperCase()}</small></div>
-        <div className={`score-summary ${score.displayRange ? 'is-scored' : 'needs-review'}`}><strong>{score.displayRange ? scoreLabel(score) : 'Review required'}</strong><span>{score.displayRange ? `/ 100 · ${score.status}` : score.status}</span></div>
-        <p className="score-caption"><b>Evidence coverage: {score.knownWeight}/100 weighted points.</b> {score.knownWeight < 100 ? 'Unknown factors widen the range. ' : ''}Water and sewer capacity stays unknown on every parcel. This is a relative screening score, not a permit decision.</p>
+        <ScoreHeadline score={score} estimate={estimate} />
+        <p className="score-caption"><b>Evidence coverage: {score.knownWeight}/100 weighted points.</b> The integer is the AI estimate. The screened range is the narrowed band. The rules range is the scoring standard. This is a relative screening score, not a permit decision.</p>
         <div className={`evidence-coverage ${score.knownWeight < 100 ? 'partial' : 'complete'}`} role="img" aria-label={`${score.knownWeight} of 100 weighted points have source data`}><span style={{ width: `${score.knownWeight}%` }} /></div>
         {evaluation.explanation && <section className="score-explanation"><h3>Why this score</h3><p>{evaluation.explanation.summary}</p><p><b>Highest-impact change.</b> {evaluation.explanation.intervention.sentence}</p></section>}
         <section className="score-explanation"><h3>Screened range</h3>
@@ -337,11 +357,9 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, 
             <p><b>{estimate.result.estimatedMinimum}–{estimate.result.estimatedMaximum}</b>. This range uses the confidence rules, not a model. The rules range stays {estimate.result.rulesMinimum}–{estimate.result.rulesMaximum}. {estimate.result.rationale}</p>
             {estimate.result.applied.map((item) => <p key={item.key}>{item.label}: {item.earned > 0 ? `${item.earned} counted` : ''}{item.earned > 0 && item.withheld > 0 ? ', ' : ''}{item.withheld > 0 ? `${item.withheld} closed` : ''} of {item.weight}.{item.residual > 0 ? ` ${item.residual} still open.` : ''} {item.rationale}</p>)}
             {estimate.result.stillUnknown.length > 0 && <p>Still open: {estimate.result.stillUnknown.map((item) => `${item.label} ${item.weight}`).join(', ')}.</p>}
-            {estimate.result.agent?.point != null
-              ? <p><b>Agent score {estimate.result.agent.point}.</b> {estimate.result.agent.interpretation}{estimate.result.agent.provider === 'session-placement' ? ' Placed from the open points on this machine. The remote model was not called.' : ''}</p>
-              : <p><b>Agent score withheld.</b> No model key is configured, so no integer is placed inside this range.</p>}
-          </> : <p>{estimate?.error || (estimate?.status === 'running' ? 'Checking nearby parcels…' : 'The rules range above is the standard. The screened range narrows open points from the zoning map and nearby parcels of the same type.')}</p>}
-          <button type="button" onClick={onEstimate} disabled={estimate?.status === 'running'}>Screen the open points</button>
+            {estimate.result.agent?.interpretation && <p>{estimate.result.agent.interpretation}</p>}
+          </> : <p>{estimate?.status === 'running' ? 'Checking nearby parcels…' : 'The screened range narrows open points from the zoning map and nearby parcels of the same type.'}</p>}
+          {estimate?.status === 'failed' && <button type="button" onClick={onEstimate}>Try the estimate again</button>}
         </section>
         <div className="overview-highlights" aria-label="Site findings and next step">
           <div className={keyConstraint ? 'highlight-constraint' : score.displayRange ? 'highlight-confirmed' : 'highlight-verify'}><span>{score.displayRange ? 'KEY CONSTRAINT' : 'APPROVAL PATH'}</span><strong>{keyConstraint?.title || (score.displayRange ? 'No mapped constraint flagged' : score.status)}</strong><p>{keyConstraint?.detail || (score.displayRange ? 'Only the screened source layers are covered; check the full rules and site conditions.' : 'Confirm the current use and review route with the City before treating this as a buildable site.')}</p></div>
@@ -582,6 +600,19 @@ export default function App() {
       .then((data) => setEstimate(data))
       .catch((error) => setEstimate({ status: 'failed', error: error.message }));
   }, [selected, scenario]);
+
+  useEffect(() => {
+    const pin = selected?.lookupId || selected?.pin;
+    if (!pin || selected?.evaluation?.scenario?.id !== scenario) return undefined;
+    const controller = new AbortController();
+    setEstimate({ status: 'running' });
+    getJSON('/api/ai-score', controller.signal, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: pin, scenario }),
+    }).then((data) => { if (!controller.signal.aborted) setEstimate(data); })
+      .catch((error) => { if (error.name !== 'AbortError') setEstimate({ status: 'failed', error: error.message }); });
+    return () => controller.abort();
+  }, [selected?.pin, selected?.lookupId, selected?.evaluation?.scenario?.id, scenario]);
 
   useEffect(() => {
     if (!comparisonIds.length) return;
@@ -907,7 +938,7 @@ export default function App() {
           {selected && <FloatingReport key={selected.selectionId} label={selected.properties.MAPBLOCKLOT || selected.pin} onClose={clearSelection} mapAreaRef={mapArea} mapRef={map} parcelBounds={selected.parcelBounds} comparisonExpanded={comparisonExpanded}>
             {selected.zoningLoading && selected.evaluation?.scenario.id !== scenario && <div className="report-loading" role="status"><span className="report-loading-label"><span className="tiny-spinner" /> Checking zoning, site conditions, and source records…</span><span className="skeleton-line skeleton-wide" /><span className="skeleton-line skeleton-mid" /></div>}
             {selected.zoningError && selected.evaluation?.scenario.id !== scenario && <p className="source-warning report-error">{selected.zoningError}</p>}
-            {selected.evaluation?.scenario.id === scenario && <CompactScore evaluation={selected.evaluation} onShowDetails={showFullReport} />}
+            {selected.evaluation?.scenario.id === scenario && <CompactScore evaluation={selected.evaluation} estimate={estimate} onShowDetails={showFullReport} />}
           </FloatingReport>}
         </section>
         {comparisonIds.length > 0 && <ComparisonBoard comparison={comparison} loading={comparisonLoading} error={comparisonError} onOpen={openComparisonParcel} onClear={clearComparison} scenario={scenario} policy={policy} expanded={comparisonExpanded} onToggle={() => setComparisonExpanded((value) => !value)} count={comparisonIds.length} />}
