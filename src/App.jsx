@@ -69,7 +69,7 @@ function EvidenceList({ title, entries, ordered = false }) {
   return <section className="evidence-section">
     <h3>{title}</h3>
     <Tag>{entries.map((entry, index) => <li key={`${entry.title}-${index}`}>
-      <div className="evidence-item-head"><div>{entry.category && <small className="evidence-category">{entry.category}</small>}<strong>{entry.title}</strong></div><span className={`evidence-tag ${entry.status === 'confirmed' ? 'confirmed' : ''}`}>{entry.priority ? `Priority ${entry.priority}` : entry.status === 'confirmed' ? 'Confirmed in source' : entry.status === 'simulated' ? 'Hypothetical' : entry.status === 'likely' ? 'Likely' : entry.status === 'possible' ? 'Possible' : 'Needs verification'}</span></div>
+      <div className="evidence-item-head"><div>{entry.category && <small className="evidence-category">{entry.category}</small>}<strong>{entry.title}</strong></div><span className={`evidence-tag status-${entry.status || 'verify'}`}>{entry.priority ? `Priority ${entry.priority}` : entry.status === 'confirmed' ? 'Confirmed in source' : entry.status === 'simulated' ? 'Hypothetical' : entry.status === 'likely' ? 'Likely' : entry.status === 'possible' ? 'Possible' : 'Needs verification'}</span></div>
       <p>{entry.detail || entry.reason}</p>
       {entry.basis && <small>Basis: {entry.basis}</small>}
       <DataLink href={entry.source}>Source</DataLink>
@@ -120,6 +120,8 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, 
   const [activeTab, setActiveTab] = useState('overview');
   const ruleFindings = decision.obstacles.filter((entry) => ['Zoning', 'Policy'].includes(entry.category));
   const riskFindings = decision.obstacles.filter((entry) => ['Environment', 'Infrastructure'].includes(entry.category));
+  const keyConstraint = decision.obstacles.find((entry) => entry.status === 'confirmed' && !/^(Base use appears|No mapped|Assessment records)/.test(entry.title));
+  const firstVerification = decision.obstacles.find((entry) => entry.status === 'verify');
 
   function changeTab(tab) {
     setActiveTab(tab);
@@ -144,8 +146,14 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, 
     <div id="report-tab-panel" role="tabpanel" aria-labelledby={`report-tab-${activeTab}`} className="report-tab-panel" key={activeTab}>
       {activeTab === 'overview' && <>
         <div className="evaluation-heading"><span>DEVELOPMENT EASE · PROTOTYPE</span><small>{evaluation.scenario.title.toUpperCase()}</small></div>
-        <div className="score-summary"><strong>{score.displayRange ? scoreLabel(score) : 'Review required'}</strong><span>{score.displayRange ? `/ 100 · ${score.status}` : score.status}</span></div>
+        <div className={`score-summary ${score.displayRange ? 'is-scored' : 'needs-review'}`}><strong>{score.displayRange ? scoreLabel(score) : 'Review required'}</strong><span>{score.displayRange ? `/ 100 · ${score.status}` : score.status}</span></div>
         <p className="score-caption"><b>Evidence coverage: {score.knownWeight}/100 weighted points.</b> {score.knownWeight < 100 ? 'Unknown factors widen the range. ' : ''}{!score.displayRange ? 'The headline score is withheld until the use or approval path is reviewed. ' : ''}This is a relative screening result, not a permit decision.</p>
+        <div className={`evidence-coverage ${score.knownWeight < 100 ? 'partial' : 'complete'}`} role="img" aria-label={`${score.knownWeight} of 100 weighted points have source data`}><span style={{ width: `${score.knownWeight}%` }} /></div>
+        <div className="overview-highlights" aria-label="Site findings and next step">
+          <div className={keyConstraint ? 'highlight-constraint' : score.displayRange ? 'highlight-confirmed' : 'highlight-verify'}><span>{score.displayRange ? 'KEY CONSTRAINT' : 'APPROVAL PATH'}</span><strong>{keyConstraint?.title || (score.displayRange ? 'No mapped constraint flagged' : score.status)}</strong><p>{keyConstraint?.detail || (score.displayRange ? 'Only the screened source layers are covered; check the full rules and site conditions.' : 'Confirm the current use and review route with the City before treating this as a buildable site.')}</p></div>
+          <div className="highlight-verify"><span>NEEDS VERIFICATION</span><strong>{firstVerification?.title || 'Confirm site-specific requirements'}</strong></div>
+          {decision.nextActions[0] && <div className="highlight-action"><span>FIRST ACTION</span><strong>{decision.nextActions[0].title}</strong></div>}
+        </div>
         {scenarioOptions?.length > 0 && <section className="scenario-matrix"><h3>Same parcel · three housing options</h3><div>
           {scenarioOptions.map((option) => <button type="button" className={option.scenario.id === evaluation.scenario.id ? 'active' : ''} key={option.scenario.id} onClick={() => onScenarioChange(option.scenario.id)}>
             <span>{option.scenario.title}</span><strong>{scoreLabel(option.score)}</strong>
@@ -166,7 +174,6 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, 
           <small>GIS status: {district.status || 'not recorded'}</small>
         </div>) : <strong className="muted">No city zoning overlap found; this parcel may be outside Pittsburgh.</strong>}
         {zoningReviewReasons.length > 0 && <p className="review-flag">Review needed: {zoningReviewReasons.join('; ')}.</p>}</div>
-        {decision.nextActions[0] && <div className="overview-next"><span>FIRST ACTION</span><strong>{decision.nextActions[0].title}</strong><p>{decision.nextActions[0].reason}</p></div>}
       </>}
       {activeTab === 'rules' && <>
         <p className="tab-intro">How the mapped parcel and selected housing type compare with the screened zoning and site rules.</p>
@@ -276,7 +283,7 @@ export default function App() {
       paddingTopLeft: compact ? [28, 24] : [36, 56],
       paddingBottomRight: compact ? [28, comparisonExpandedRef.current ? 320 : 210] : [420, comparisonExpandedRef.current ? 320 : 56],
       animate: !reducedMotion,
-      duration: 1.15,
+      duration: 0.9,
       easeLinearity: 0.2,
     });
     if (compact) mapArea.current?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
@@ -309,7 +316,7 @@ export default function App() {
     try {
       const data = await getJSON(`/api/site-evaluation?pin=${encodeURIComponent(lookupId)}&scenario=${scenarioRef.current}`, controller.signal);
       const options = await getJSON(`/api/scenario-options?pin=${encodeURIComponent(lookupId)}`, controller.signal).catch(() => null);
-      setSelected((previous) => previous?.pin === pin ? { ...previous, districts: data.districts || [], evaluation: data, scenarioOptions: options?.options || [], zoningLoading: false } : previous);
+      setSelected((previous) => previous?.pin === pin ? { ...previous, districts: data.districts || [], evaluation: data, scenarioOptions: options?.options || [], zoningLoading: false, zoningError: null } : previous);
     } catch (error) {
       if (error.name !== 'AbortError') {
         setSelected((previous) => previous?.pin === pin ? { ...previous, zoningLoading: false, zoningError: error.message } : previous);
@@ -322,9 +329,9 @@ export default function App() {
     parcelZoningRequest.current?.abort();
     const controller = new AbortController();
     parcelZoningRequest.current = controller;
-    setSelected((previous) => previous ? { ...previous, zoningLoading: true } : previous);
+    setSelected((previous) => previous ? { ...previous, zoningLoading: true, zoningError: null } : previous);
     getJSON(`/api/site-evaluation?pin=${encodeURIComponent(selected.lookupId || selected.pin)}&scenario=${scenario}`, controller.signal)
-      .then((data) => setSelected((previous) => previous?.pin === selected.pin ? { ...previous, evaluation: data, districts: data.districts || [], zoningLoading: false } : previous))
+      .then((data) => setSelected((previous) => previous?.pin === selected.pin ? { ...previous, evaluation: data, districts: data.districts || [], zoningLoading: false, zoningError: null } : previous))
       .catch((error) => {
         if (error.name !== 'AbortError') setSelected((previous) => previous?.pin === selected.pin ? { ...previous, zoningError: error.message, zoningLoading: false } : previous);
       });
@@ -433,10 +440,10 @@ export default function App() {
         if (controller.signal.aborted) return;
         parcelLayer.current.clearLayers();
         L.geoJSON(data, {
-          style: { color: '#365d57', weight: 1.25, fillColor: '#e6f0e9', fillOpacity: 0.14 },
+          style: { color: selectedRef.current ? '#759186' : '#365d57', weight: selectedRef.current ? 1.05 : 1.25, fillColor: '#e6f0e9', fillOpacity: 0.14 },
           onEachFeature: (feature, layer) => {
             layer.on('mouseover', () => layer.setStyle({ color: '#dc6838', weight: 2.2, fillOpacity: 0.26 }));
-            layer.on('mouseout', () => layer.setStyle({ color: '#365d57', weight: 1.25, fillOpacity: 0.14 }));
+            layer.on('mouseout', () => layer.setStyle({ color: selectedRef.current ? '#759186' : '#365d57', weight: selectedRef.current ? 1.05 : 1.25, fillOpacity: 0.14 }));
             layer.on('click', () => selectParcel(feature));
           },
         }).addTo(parcelLayer.current);
@@ -611,46 +618,51 @@ export default function App() {
         <aside className="sidebar">
           <div className="sidebar-content">
             <div className="eyebrow"><span>01</span> SITE EXPLORATION <ArrowDownRight size={16} /></div>
-            <h1>Start with<br /><em>a parcel.</em></h1>
-            <p className="intro-copy">Find a real parcel and examine the site evidence for a small housing project.</p>
-
-            <section className="scenario-card" aria-label="Selected development scenario">
-              <div className="scenario-top"><span>HOUSING SCENARIO</span><span>ONE USE AT A TIME</span></div>
-              <strong>{SCENARIOS.find((entry) => entry.id === scenario)?.title}</strong>
-              <p>Compare the same parcel or multiple parcels under a fixed building type.</p>
-              <div className="scenario-picker">{SCENARIOS.map((entry) => <button type="button" className={scenario === entry.id ? 'active' : ''} key={entry.id} onClick={() => setScenario(entry.id)} aria-pressed={scenario === entry.id}>{entry.short}</button>)}</div>
-            </section>
+            <h1 className="hero-title">From parcel<br /><em>to possibility.</em></h1>
+            <p className="intro-copy">Explore housing options, rules, and risks for real Pittsburgh parcels.</p>
 
             <form className="search-box" onSubmit={searchParcel}>
-              <label htmlFor="parcel-search">SEARCH PARCEL ID</label>
+              <label htmlFor="parcel-search"><span>FIND A SITE</span><small>01 / SEARCH</small></label>
               <div className="search-control">
                 <Search size={18} strokeWidth={1.8} />
                 <input id="parcel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="e.g. 2-J-129" autoComplete="off" />
                 <button type="submit" aria-label="Search parcel" disabled={loading.search}>{loading.search ? <span className="tiny-spinner" /> : <ArrowUpRight size={18} />}</button>
               </div>
-              <p>Use a full PIN or county block/lot ID</p>
+              <p>Search a full PIN or county block/lot ID · e.g. 85-N-171</p>
             </form>
-
-            <form className="compare-form" onSubmit={compareParcels}>
-              <label htmlFor="compare-ids">COMPARE 1–5 PARCEL IDs</label>
-              <textarea id="compare-ids" value={comparisonInput} onChange={(event) => setComparisonInput(event.target.value)} placeholder="85-N-171, 85-N-163, 2-N-297" rows={2} />
-              <button type="submit">Compare parcels <ArrowUpRight size={15} /></button>
-              {comparisonError && !comparisonIds.length && <p className="source-warning">{comparisonError}</p>}
-            </form>
-
-            <section className="policy-controls" aria-label="Hypothetical policy interventions">
-              <strong>Policy / resource simulation</strong>
-              <p>Hypothetical changes only. Source GIS and baseline scores stay visible.</p>
-              {[
-                ['allowResidentialUse', 'Allow selected use in residential districts'],
-                ['reduceMinimumLot', 'Reduce published lot minimum by 20%'],
-                ['assumeUtilityCapacity', 'Assume utility capacity is available'],
-              ].map(([key, label]) => <label key={key}><input type="checkbox" checked={policy[key]} onChange={(event) => togglePolicy(key, event.target.checked)} />{label}</label>)}
-            </section>
 
             {notice && <div className="notice" role="status"><span>!</span>{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notice"><X size={14} /></button></div>}
 
-            <section className="panel-section">
+            <section className="scenario-card" aria-label="Selected development scenario">
+              <div className="scenario-top"><span>HOUSING SCENARIO</span><span>02 / CHOOSE</span></div>
+              <strong>{SCENARIOS.find((entry) => entry.id === scenario)?.title}</strong>
+              <p>One building type at a time. Switch options to compare what the site could support.</p>
+              <div className="scenario-picker">{SCENARIOS.map((entry) => <button type="button" className={scenario === entry.id ? 'active' : ''} key={entry.id} onClick={() => setScenario(entry.id)} aria-pressed={scenario === entry.id}>{entry.short}</button>)}</div>
+            </section>
+
+            <div className="sidebar-tools-label">EXPLORE FURTHER <span>OPTIONAL TOOLS</span></div>
+            <details className="sidebar-disclosure">
+              <summary><span className="disclosure-icon"><Layers3 size={16} /></span><span><strong>Compare sites</strong><small>View 1–5 parcels side by side</small></span><ChevronDown size={17} className="disclosure-chevron" /></summary>
+              <div className="disclosure-body"><form className="compare-form" onSubmit={compareParcels}>
+                <label htmlFor="compare-ids">PARCEL IDs</label>
+                <textarea id="compare-ids" value={comparisonInput} onChange={(event) => setComparisonInput(event.target.value)} placeholder="85-N-171, 85-N-163, 2-N-297" rows={2} />
+                <button type="submit">Compare parcels <ArrowUpRight size={15} /></button>
+                {comparisonError && !comparisonIds.length && <p className="source-warning">{comparisonError}</p>}
+              </form></div>
+            </details>
+
+            <details className="sidebar-disclosure">
+              <summary><span className="disclosure-icon"><Compass size={16} /></span><span><strong>Planning tools</strong><small>Policy simulation & map layers</small></span><ChevronDown size={17} className="disclosure-chevron" /></summary>
+              <div className="disclosure-body"><section className="policy-controls" aria-label="Hypothetical policy interventions">
+                <strong>Policy / resource simulation</strong>
+                <p>Hypothetical changes only. Source GIS and baseline scores stay visible.</p>
+                {[
+                  ['allowResidentialUse', 'Allow selected use in residential districts'],
+                  ['reduceMinimumLot', 'Reduce published lot minimum by 20%'],
+                  ['assumeUtilityCapacity', 'Assume utility capacity is available'],
+                ].map(([key, label]) => <label key={key}><input type="checkbox" checked={policy[key]} onChange={(event) => togglePolicy(key, event.target.checked)} />{label}</label>)}
+              </section>
+              <section className="panel-section">
               <div className="section-heading"><Layers3 size={18} strokeWidth={1.7} /><span>Map layers</span></div>
               <button className="layer-row" type="button" onClick={() => toggleLayer('parcels')} aria-pressed={layers.parcels}>
                 <span className="layer-symbol parcel-symbol" />
@@ -663,7 +675,8 @@ export default function App() {
                 <span className={`switch ${layers.zoning ? 'on' : ''}`}><span /></span>
               </button>
               <div className="legend"><span><i className="legend-residential" />Residential</span><span><i className="legend-mixed" />Other urban</span><span><i className="legend-special" />Special areas</span></div>
-            </section>
+              </section></div>
+            </details>
 
             <div className="sidebar-guide"><MapPin size={17} /><span>{selected ? `Viewing ${selected.properties.MAPBLOCKLOT || selected.pin} on the map` : 'Search an ID or select a parcel to open its site report on the map.'}</span></div>
           </div>
@@ -671,7 +684,7 @@ export default function App() {
           <div className="sidebar-footer"><span>DATA SOURCES</span><DataLink href={PARCEL_SOURCE}>County parcels</DataLink><DataLink href={ZONING_SOURCE}>City zoning</DataLink></div>
         </aside>
 
-        <section className={`map-area ${comparisonExpanded ? 'comparison-expanded' : ''} ${boundaryStatus === 'loading' && zoom < MIN_ZONING_ZOOM ? 'city-boundary-loading' : ''}`} ref={mapArea} aria-label="Pittsburgh parcel map">
+        <section className={`map-area ${selected ? 'has-selection' : ''} ${comparisonExpanded ? 'comparison-expanded' : ''} ${boundaryStatus === 'loading' && zoom < MIN_ZONING_ZOOM ? 'city-boundary-loading' : ''}`} ref={mapArea} aria-label="Pittsburgh parcel map">
           <div ref={mapElement} className="map-canvas" />
           {boundaryStatus === 'loading' && zoom < MIN_ZONING_ZOOM && <div className="city-map-loading" role="status"><span className="tiny-spinner" /> Loading Pittsburgh city boundary…</div>}
           <div className="map-top-left"><span className="map-locator"><LocateFixed size={15} /> UNITED STATES / PENNSYLVANIA / PITTSBURGH</span></div>
@@ -685,8 +698,8 @@ export default function App() {
               <div className="selected-card">
                 <div className="selected-pin"><MapPin size={17} strokeWidth={1.8} /><span>County parcel · {selected.properties.MAPBLOCKLOT || selected.pin}</span><Check size={16} /></div>
                 <button className="add-comparison" type="button" onClick={addSelectedToComparison}>Add to comparison <ArrowUpRight size={14} /></button>
-                {selected.zoningLoading && !selected.evaluation && <div className="report-loading" role="status"><span className="tiny-spinner" /> Checking zoning, site conditions, and source records…</div>}
-                {selected.zoningError && !selected.evaluation && <p className="source-warning report-error">{selected.zoningError}</p>}
+                {selected.zoningLoading && selected.evaluation?.scenario.id !== scenario && <div className="report-loading" role="status"><span className="report-loading-label"><span className="tiny-spinner" /> Checking zoning, site conditions, and source records…</span><span className="skeleton-line skeleton-wide" /><span className="skeleton-line skeleton-mid" /><span className="skeleton-line skeleton-short" /></div>}
+                {selected.zoningError && selected.evaluation?.scenario.id !== scenario && <p className="source-warning report-error">{selected.zoningError}</p>}
                 {selected.evaluation?.scenario.id === scenario && <ScorePanel evaluation={selected.evaluation} scenarioOptions={selected.scenarioOptions} onScenarioChange={setScenario} areaLabel={areaLabel} zoningReviewReasons={zoningReviewReasons} scrollContainerRef={selectedCard} />}
               </div>
             </div>
