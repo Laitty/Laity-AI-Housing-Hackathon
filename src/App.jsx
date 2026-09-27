@@ -77,7 +77,7 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange }) {
     <div className="evaluation-heading"><span>DEVELOPMENT EASE · PROTOTYPE</span><small>{evaluation.scenario.title.toUpperCase()}</small></div>
     <div className="score-summary">
       <strong>{score.displayRange ? scoreLabel(score) : 'Review required'}</strong>
-      <span>{score.displayRange ? '/ 100 · preliminary range' : score.status}</span>
+      <span>{score.displayRange ? `/ 100 · ${score.status}` : score.status}</span>
     </div>
     <p className="score-caption">{score.knownWeight}/100 points have data for this initial check. {score.knownWeight < 100 ? 'Unknown factors widen the range. ' : ''}This is a relative screening score, not a permit decision.</p>
     {scenarioOptions?.length > 0 && <section className="scenario-matrix"><h3>Same parcel · three housing options</h3><div>

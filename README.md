@@ -47,7 +47,7 @@ The attached Track 1 research memo suggested starting weights of **zoning/rules 
 | ≥25% slope | 10 | Intersect parcel with city steep-slope polygons. |
 | Undermined area | 8 | Intersect parcel with city undermined-area polygons. |
 
-Each environmental factor gets full points for <1% mapped overlap, about 70% for 1–<10%, about 40% for 10–<50%, and 0 for ≥50%. A failed query makes the factor `Unknown`, widening the score range; it is never treated as a zero-overlap result. The headline score is withheld if base use is not screenable/by-right or the mapped area is below the published minimum. This is deliberately conservative: a variance or existing-lot provision may still be available, but the app cannot decide that.
+Each environmental factor gets full points for <1% mapped overlap, about 70% for 1–<10%, about 40% for 10–<50%, and 0 for ≥50%. A failed query makes the factor `Unknown`, widening the score range; it is never treated as a zero-overlap result. The headline score is withheld if base use is not screenable/by-right. A mapped lot below the published minimum earns 0/15 and requires review, but the score remains visible because legal zoning lots and exceptions may differ from the single mapped parcel.
 
 ## Obstacles, approval path, and interventions
 
@@ -58,6 +58,8 @@ Each environmental factor gets full points for <1% mapped overlap, about 70% for
 - **Applications:** for new buildings, the City's current [Building & Development Application](https://www.pittsburghpa.gov/Business-Development/Permits-Licenses-and-Inspections/Permitting/Building-Development-Application) is the initial route. Four-unit new construction is listed for Site Plan Review by [§ 903.02.E.2 and § 922.04.A.5](https://ecode360.com/45479034). Other reviews/permits are conditional on location and project scope.
 
 The policy toggles are **counterfactual tests**, not enacted law or verified utility improvements. The use switch applies only to the screened residential base districts. The utility switch changes uncertainty in a hypothetical decision context, **not the numeric score**. A newly displayed counterfactual score means only that this prototype's screening gate opened; it does not establish legal feasibility.
+
+The [2026-09-27 raw-data backtest](analysis/backtest-2026-09-27.md) checked 16 distinct parcels with issued two-unit new-construction permits against the downloaded GIS snapshots, plus 2,000 randomly sampled city parcels. Seven permit parcels fell below the mapped single-parcel base lot minimum, so this condition is now a scored review flag rather than a headline-score veto. Eleven of the 16 permit parcels receive a conditional score; five still need zoning review. The backtest does not establish predictive accuracy because historical denied applications and contemporaneous zoning maps were unavailable.
 
 ## API and Jev adapter point
 
@@ -74,4 +76,4 @@ The policy toggles are **counterfactual tests**, not enacted law or verified uti
 
 This version compares **separate parcels**, not a merged legal zoning lot. Do not add parcel scores to assess assembled sites. It does not establish a buildable envelope, exact permit path, current official flood determination, utility capacity, ownership availability, costs, market feasibility, or approval probability. The historic check covers mapped city districts but not every individual designation. GIS data and assessment records can lag current conditions. Source queries are cached for five minutes per ID to make scenario switching responsive.
 
-Run `npm test` and `npm run build`. Before competition submission, compare 5–10 known local cases with planning/development professionals and recalibrate the product weights and thresholds. OpenAI Codex assisted with the implementation; public records and rules are from linked sources, while uncited thresholds and interventions are prototype choices.
+Run `npm test` and `npm run build`. The [duplex backtest](analysis/backtest-2026-09-27.md) uses downloaded parcel, GIS, and permit records; planning/development professionals still need to review representative cases before the product thresholds are calibrated. OpenAI Codex assisted with the implementation; public records and rules are from linked sources, while uncited thresholds and interventions are prototype choices.

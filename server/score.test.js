@@ -39,11 +39,11 @@ test('scores a mapped flood intersection as a partial factor', () => {
   assert.ok(result.review.some((entry) => entry.includes('flood')));
 });
 
-test('withholds the headline score when mapped area is below the published minimum', () => {
+test('shows a conditional score and review flag when mapped area is below the published minimum', () => {
   const result = scoreSite({ areaSqM: 200, compactness: 0.6, districts: r2,
     flood: noOverlap, slope: noOverlap, undermined: noOverlap });
   assert.equal(result.items.find((entry) => entry.key === 'lot-minimum').earned, 0);
-  assert.equal(result.displayRange, false);
+  assert.equal(result.displayRange, true);
   assert.match(result.status, /Minimum lot size/);
 });
 
@@ -68,11 +68,14 @@ test('policy use permission can open a hypothetical screen without rewriting bas
   assert.equal(changed.minimum - baseline.minimum, 30);
 });
 
-test('a 20% lot-minimum reduction opens only a hypothetical screen', () => {
+test('a 20% lot-minimum reduction changes the hypothetical score but not base-use screening', () => {
   const common = { areaSqM: 240, compactness: 0.6, districts: r2,
     flood: noOverlap, slope: noOverlap, undermined: noOverlap, scenario: 'duplex' };
-  assert.equal(scoreSite(common).displayRange, false);
+  const baseline = scoreSite(common);
+  assert.equal(baseline.displayRange, true);
+  assert.equal(baseline.items.find((entry) => entry.key === 'lot-minimum').earned, 0);
   const changed = scoreSite({ ...common, policy: { reduceMinimumLot: true } });
   assert.equal(changed.displayRange, true);
   assert.equal(changed.effectiveMinimumSqFt, 2400);
+  assert.equal(changed.minimum - baseline.minimum, 15);
 });

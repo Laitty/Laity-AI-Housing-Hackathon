@@ -114,7 +114,9 @@ export function scoreSite({ areaSqM, compactness, districts, flood, slope, under
   const knownWeight = items.reduce((sum, entry) => sum + (entry.earned === null ? 0 : entry.weight), 0);
   const minimum = items.reduce((sum, entry) => sum + (entry.earned ?? 0), 0);
   const maximum = minimum + (100 - knownWeight);
-  const displayRange = (permittedByTable || policyUseChange) && lotPoints !== 0;
+  // A mapped lot below the base minimum is a review flag, not proof that
+  // a permit is impossible: legal zoning lots and exceptions vary.
+  const displayRange = permittedByTable || policyUseChange;
   return {
     items, knownWeight, minimum, maximum, displayRange, useFinding,
     publishedMinimumSqFt: publishedMinimum,
@@ -122,7 +124,7 @@ export function scoreSite({ areaSqM, compactness, districts, flood, slope, under
     policyUseChange,
     status: !residentialBase ? 'Base zoning review required before a score'
       : !(permittedByTable || policyUseChange) ? 'Use is not listed by-right; review path before a score'
-        : lotPoints === 0 ? 'Minimum lot size review required before a score'
+        : lotPoints === 0 ? 'Minimum lot size review required'
           : policyUseChange || policy.reduceMinimumLot ? 'Hypothetical policy scenario' : 'Preliminary screening range',
     review,
   };
