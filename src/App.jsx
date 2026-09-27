@@ -20,6 +20,7 @@ const ZONING_SOURCE = 'https://data.wprdc.org/dataset/zoning';
 const CITY_CENTER = [40.4406, -79.9959];
 const CITY_BOUNDS = [[40.3616, -80.0954], [40.5010, -79.8657]];
 const DOWNTOWN = [40.4385, -79.9972];
+const MIN_ZONING_ZOOM = 13;
 const MIN_PARCEL_ZOOM = 16;
 
 function zoningColor(properties = {}) {
@@ -344,7 +345,7 @@ export default function App() {
       });
     }
 
-    if (!layers.zoning) {
+    if (!layers.zoning || currentZoom < MIN_ZONING_ZOOM) {
       zoningLayer.current.clearLayers();
       setZoningCount(0);
       setLoading((previous) => ({ ...previous, zoning: false }));
@@ -542,12 +543,12 @@ export default function App() {
               <div className="section-heading"><Layers3 size={18} strokeWidth={1.7} /><span>Map layers</span></div>
               <button className="layer-row" type="button" onClick={() => toggleLayer('parcels')} aria-pressed={layers.parcels}>
                 <span className="layer-symbol parcel-symbol" />
-                <span className="layer-label"><strong>Parcel boundaries</strong><small>Allegheny County GIS</small></span>
+                <span className="layer-label"><strong>Parcel boundaries</strong><small>County GIS · from zoom 16</small></span>
                 <span className={`switch ${layers.parcels ? 'on' : ''}`}><span /></span>
               </button>
               <button className="layer-row" type="button" onClick={() => toggleLayer('zoning')} aria-pressed={layers.zoning}>
                 <span className="layer-symbol zoning-symbol" />
-                <span className="layer-label"><strong>Zoning districts</strong><small>City of Pittsburgh GIS</small></span>
+                <span className="layer-label"><strong>Zoning districts</strong><small>City GIS · from zoom 13</small></span>
                 <span className={`switch ${layers.zoning ? 'on' : ''}`}><span /></span>
               </button>
               <div className="legend"><span><i className="legend-residential" />Residential</span><span><i className="legend-mixed" />Other urban</span><span><i className="legend-special" />Special areas</span></div>
@@ -564,7 +565,7 @@ export default function App() {
           <div className="map-top-left"><span className="map-locator"><LocateFixed size={15} /> UNITED STATES / PENNSYLVANIA / PITTSBURGH</span></div>
           <div className="map-top-right"><button type="button" onClick={showCityOverview}><Compass size={16} /> City overview</button><button type="button" onClick={() => { clearSelection(); map.current?.flyTo(DOWNTOWN, 16, { duration: 1 }); }}><Focus size={16} /> Downtown example</button></div>
           {layers.parcels && zoom < MIN_PARCEL_ZOOM && !selected && <div className="zoom-hint"><span className="hint-icon"><MousePointer2 size={17} /></span><span><strong>Explore Pittsburgh</strong><small>Search a parcel ID or zoom in to select a site</small></span><ChevronRight size={16} /></div>}
-          <div className="map-bottom-left"><span className="status-pulse" /><span>{loading.parcels || loading.zoning ? 'Loading map data' : zoom >= MIN_PARCEL_ZOOM && layers.parcels ? `${parcelCount.toLocaleString()} parcels · ${zoningCount} zoning areas` : `${zoningCount} zoning areas · zoom in for parcels`}</span><span className="status-divider" /> <span>ZOOM {zoom}</span></div>
+          <div className="map-bottom-left"><span className="status-pulse" /><span>{loading.parcels || loading.zoning ? 'Loading map data' : zoom >= MIN_PARCEL_ZOOM && layers.parcels ? `${parcelCount.toLocaleString()} parcels · ${zoningCount} zoning areas` : zoom >= MIN_ZONING_ZOOM && layers.zoning ? `${zoningCount} zoning areas · zoom in for parcels` : 'Pittsburgh overview · zoom in for districts'}</span><span className="status-divider" /> <span>ZOOM {zoom}</span></div>
           <div className="map-north">N <span>↑</span></div>
           {selected && <aside className="parcel-sheet" key={selected.pin} aria-label={`Site report for ${selected.properties.MAPBLOCKLOT || selected.pin}`}>
             <div className="parcel-sheet-head"><div><span>SITE REPORT</span><strong>{selected.properties.MAPBLOCKLOT || selected.pin}</strong></div><button type="button" onClick={clearSelection} aria-label="Close site report"><X size={18} /></button></div>
