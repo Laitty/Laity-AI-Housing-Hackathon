@@ -24,7 +24,7 @@ npm start
 
 - [阿勒格尼县地块边界](https://data.wprdc.org/dataset/allegheny-county-parcel-boundaries1)：页面提供的县级完整 GeoJSON 约 444 MB。应用改为按当前地图范围请求[县 GIS 地块接口](https://gisdata.alleghenycounty.us/arcgis/rest/services/OPENDATA/Parcels/MapServer/0)，只显示缩放级别 16 及以上的地块。
 - [匹兹堡规划分区](https://data.wprdc.org/dataset/zoning)：按当前视野请求[市 GIS 分区接口](https://services1.arcgis.com/YZCmUqbcsUpOKfj7/arcgis/rest/services/PGHWebZoning/FeatureServer/0)。分区只覆盖匹兹堡市内。
-- 底图：CARTO / OpenStreetMap，通过 Leaflet 显示。
+- 底图：[OpenStreetMap 标准瓦片](https://operations.osmfoundation.org/policies/tiles/)，通过 Leaflet 按当前视野加载。公开演示不需要 API key；正式大流量部署应遵守瓦片使用政策或选择有容量保障的服务。
 
 县地块数据页给出的 PASDA 实时地图接口在开发时返回“service not started”，因此此原型使用县政府自身提供的 GIS 接口。没有把完整数据文件放入仓库。
 

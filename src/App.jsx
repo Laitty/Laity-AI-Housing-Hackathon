@@ -111,9 +111,9 @@ export default function App() {
       maxBoundsViscosity: 0.8,
     });
 
-    L.tileLayer('https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 20,
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors',
     }).addTo(instance);
     L.control.zoom({ position: 'bottomright' }).addTo(instance);
     zoningLayer.current = L.layerGroup().addTo(instance);
