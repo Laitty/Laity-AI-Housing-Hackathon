@@ -3,7 +3,6 @@ import L from 'leaflet';
 import {
   ArrowDownRight,
   ArrowUpRight,
-  Check,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -11,7 +10,6 @@ import {
   Focus,
   Layers3,
   LocateFixed,
-  MapPin,
   MousePointer2,
   Search,
   X,
@@ -102,10 +100,10 @@ function ScoreGroup({ score, group }) {
   if (!entries.length) return null;
   return <section className="score-group">
     <div className="score-group-head"><strong>{group}</strong><span>{unknown ? `${known}–${known + unknown}` : known} / {weight}</span></div>
-    {entries.map((entry) => <details className="score-item" key={entry.key}>
-      <summary><span>{entry.label}</span><b className={entry.earned === null ? 'unknown-points' : ''}>{entry.earned === null ? 'Unknown' : `${entry.earned}/${entry.weight}`}</b></summary>
+    {entries.map((entry) => <div className="score-item" key={entry.key}>
+      <div className="score-item-title"><span>{entry.label}</span><b className={entry.earned === null ? 'unknown-points' : ''}>{entry.earned === null ? 'Unknown' : `${entry.earned}/${entry.weight}`}</b></div>
       <p>{entry.detail}</p><DataLink href={entry.source}>View source</DataLink>
-    </details>)}
+    </div>)}
   </section>;
 }
 
@@ -116,7 +114,7 @@ const REPORT_TABS = [
   { id: 'actions', label: 'Actions' },
 ];
 
-function FloatingReport({ label, onClose, mapAreaRef, comparisonExpanded, bodyRef, children }) {
+function FloatingReport({ label, onClose, mapAreaRef, comparisonExpanded, children }) {
   const sheetRef = useRef(null);
   const interaction = useRef(null);
   const [geometry, setGeometry] = useState(null);
@@ -221,14 +219,26 @@ function FloatingReport({ label, onClose, mapAreaRef, comparisonExpanded, bodyRe
       </div>
       <button className="parcel-sheet-close" type="button" onClick={onClose} aria-label="Close site report"><X size={18} /></button>
     </div>
-    <div className="parcel-sheet-body" ref={bodyRef}>{children}</div>
+    <div className="parcel-sheet-body">{children}</div>
     <button className="parcel-sheet-resize" type="button" aria-label="Resize site report. Drag or use arrow keys."
       onPointerDown={(event) => startInteraction(event, 'resize')}
       onKeyDown={(event) => handleKeys(event, 'resize')}><span /></button>
   </aside>;
 }
 
-function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, zoningReviewReasons, scrollContainerRef }) {
+function CompactScore({ evaluation, onShowDetails }) {
+  const { score, explanation, scenario } = evaluation;
+  const summary = explanation?.summary?.split('. ')[0];
+  return <div className="compact-score">
+    <span className="compact-score-kicker">DEVELOPMENT EASE · {scenario.title.toUpperCase()}</span>
+    <div className={`compact-score-value ${score.displayRange ? '' : 'needs-review'}`}><strong>{scoreLabel(score)}</strong>{score.displayRange && <span>/ 100</span>}</div>
+    <p className="compact-score-status">{score.status}</p>
+    <p className="compact-score-summary">{summary ? `${summary.replace(/\.$/, '')}.` : 'This site needs a closer look before drawing a development conclusion.'}</p>
+    <button className="compact-score-details" type="button" onClick={onShowDetails}>View full details <ArrowUpRight size={16} /></button>
+  </div>;
+}
+
+function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, zoningReviewReasons, scrollTargetRef }) {
   const { score, overlays, assessment, sourceErrors, queriedAt, decision, idEvidence, districts = [] } = evaluation;
   const [activeTab, setActiveTab] = useState('overview');
   const ruleFindings = decision.obstacles.filter((entry) => ['Zoning', 'Policy'].includes(entry.category));
@@ -238,7 +248,7 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, 
 
   function changeTab(tab) {
     setActiveTab(tab);
-    scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+    scrollTargetRef.current?.scrollIntoView({ block: 'start', behavior: 'auto' });
   }
 
   function handleTabKey(event, index) {
@@ -359,10 +369,11 @@ export default function App() {
   const scenarioRef = useRef('duplex');
   const selectedRef = useRef(null);
   const comparisonExpandedRef = useRef(false);
-  const selectedCard = useRef(null);
+  const sidebarReport = useRef(null);
 
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [scenario, setScenario] = useState('duplex');
   const [comparisonInput, setComparisonInput] = useState('');
   const [comparisonIds, setComparisonIds] = useState([]);
@@ -381,10 +392,6 @@ export default function App() {
   scenarioRef.current = scenario;
   selectedRef.current = selected?.pin || null;
   comparisonExpandedRef.current = comparisonExpanded;
-
-  useEffect(() => {
-    if (selected?.pin) selectedCard.current?.scrollTo({ top: 0, behavior: 'auto' });
-  }, [selected?.pin]);
 
   const focusParcel = useCallback((feature) => {
     const currentMap = map.current;
@@ -423,6 +430,7 @@ export default function App() {
     const properties = feature.properties || {};
     const pin = properties.PIN || properties.MAPBLOCKLOT || 'Unknown parcel';
     const lookupId = requestedId || pin;
+    setDetailsOpen(false);
     setSelected({ pin, lookupId, properties, districts: [], zoningLoading: true });
     setNotice('');
 
@@ -688,7 +696,15 @@ export default function App() {
     parcelZoningRequest.current?.abort();
     selectedLayer.current?.clearLayers();
     selectedRef.current = null;
+    setDetailsOpen(false);
     setSelected(null);
+  }
+
+  function showFullReport() {
+    setDetailsOpen(true);
+    requestAnimationFrame(() => sidebarReport.current?.scrollIntoView({
+      block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    }));
   }
 
   function showCityOverview() {
@@ -752,18 +768,18 @@ export default function App() {
             </section>
 
             <div className="sidebar-tools-label">EXPLORE FURTHER <span>OPTIONAL TOOLS</span></div>
-            <details className="sidebar-disclosure">
-              <summary><span className="disclosure-icon"><Layers3 size={16} /></span><span><strong>Compare sites</strong><small>View 1–5 parcels side by side</small></span><ChevronDown size={17} className="disclosure-chevron" /></summary>
+            <section className="sidebar-disclosure" aria-label="Compare sites">
+              <div className="sidebar-disclosure-heading"><span className="disclosure-icon"><Layers3 size={16} /></span><span><strong>Compare sites</strong><small>View 1–5 parcels side by side</small></span></div>
               <div className="disclosure-body"><form className="compare-form" onSubmit={compareParcels}>
                 <label htmlFor="compare-ids">PARCEL IDs</label>
                 <textarea id="compare-ids" value={comparisonInput} onChange={(event) => setComparisonInput(event.target.value)} placeholder="85-N-171, 85-N-163, 2-N-297" rows={2} />
                 <button type="submit">Compare parcels <ArrowUpRight size={15} /></button>
                 {comparisonError && !comparisonIds.length && <p className="source-warning">{comparisonError}</p>}
               </form></div>
-            </details>
+            </section>
 
-            <details className="sidebar-disclosure">
-              <summary><span className="disclosure-icon"><Compass size={16} /></span><span><strong>Planning tools</strong><small>Policy simulation & map layers</small></span><ChevronDown size={17} className="disclosure-chevron" /></summary>
+            <section className="sidebar-disclosure" aria-label="Planning tools">
+              <div className="sidebar-disclosure-heading"><span className="disclosure-icon"><Compass size={16} /></span><span><strong>Planning tools</strong><small>Policy simulation & map layers</small></span></div>
               <div className="disclosure-body"><section className="policy-controls" aria-label="Hypothetical policy interventions">
                 <strong>Policy / resource simulation</strong>
                 <p>Hypothetical changes only. Source GIS and baseline scores stay visible.</p>
@@ -787,7 +803,12 @@ export default function App() {
               </button>
               <div className="legend"><span><i className="legend-residential" />Residential</span><span><i className="legend-mixed" />Other urban</span><span><i className="legend-special" />Special areas</span></div>
               </section></div>
-            </details>
+            </section>
+
+            {detailsOpen && selected?.evaluation?.scenario.id === scenario && <section className="sidebar-report" ref={sidebarReport} aria-label={`Full site report for ${selected.properties.MAPBLOCKLOT || selected.pin}`}>
+              <div className="sidebar-report-heading"><span>FULL SITE REPORT</span><strong>{selected.properties.MAPBLOCKLOT || selected.pin}</strong><button type="button" onClick={addSelectedToComparison}>Add to comparison <ArrowUpRight size={14} /></button></div>
+              <ScorePanel key={selected.pin} evaluation={selected.evaluation} scenarioOptions={selected.scenarioOptions} onScenarioChange={setScenario} areaLabel={areaLabel} zoningReviewReasons={zoningReviewReasons} scrollTargetRef={sidebarReport} />
+            </section>}
 
           </div>
         </aside>
@@ -800,16 +821,10 @@ export default function App() {
           {boundaryStatus !== 'loading' && layers.parcels && zoom < MIN_PARCEL_ZOOM && !selected && <div className="zoom-hint"><span className="hint-icon"><MousePointer2 size={17} /></span><span><strong>Explore Pittsburgh</strong><small>Search a parcel ID or zoom in to select a site</small></span><ChevronRight size={16} /></div>}
           <div className="map-bottom-left"><span className="status-pulse" /><span>{loading.parcels || loading.zoning ? 'Loading map data' : zoom >= MIN_PARCEL_ZOOM && layers.parcels ? `${parcelCount.toLocaleString()} parcels · ${zoningCount} zoning areas` : zoom >= MIN_ZONING_ZOOM && layers.zoning ? `${zoningCount} zoning areas · zoom in for parcels` : 'Pittsburgh overview · zoom in for districts'}</span><span className="status-divider" /> <span>ZOOM {zoom}</span></div>
           <div className="map-north">N <span>↑</span></div>
-          {selected && <FloatingReport key={selected.pin} label={selected.properties.MAPBLOCKLOT || selected.pin} onClose={clearSelection} mapAreaRef={mapArea} comparisonExpanded={comparisonExpanded} bodyRef={selectedCard}>
-            <div className="parcel-sheet-content">
-              <div className="selected-card">
-                <div className="selected-pin"><MapPin size={17} strokeWidth={1.8} /><span>County parcel · {selected.properties.MAPBLOCKLOT || selected.pin}</span><Check size={16} /></div>
-                <button className="add-comparison" type="button" onClick={addSelectedToComparison}>Add to comparison <ArrowUpRight size={14} /></button>
-                {selected.zoningLoading && selected.evaluation?.scenario.id !== scenario && <div className="report-loading" role="status"><span className="report-loading-label"><span className="tiny-spinner" /> Checking zoning, site conditions, and source records…</span><span className="skeleton-line skeleton-wide" /><span className="skeleton-line skeleton-mid" /><span className="skeleton-line skeleton-short" /></div>}
-                {selected.zoningError && selected.evaluation?.scenario.id !== scenario && <p className="source-warning report-error">{selected.zoningError}</p>}
-                {selected.evaluation?.scenario.id === scenario && <ScorePanel evaluation={selected.evaluation} scenarioOptions={selected.scenarioOptions} onScenarioChange={setScenario} areaLabel={areaLabel} zoningReviewReasons={zoningReviewReasons} scrollContainerRef={selectedCard} />}
-              </div>
-            </div>
+          {selected && <FloatingReport key={selected.pin} label={selected.properties.MAPBLOCKLOT || selected.pin} onClose={clearSelection} mapAreaRef={mapArea} comparisonExpanded={comparisonExpanded}>
+            {selected.zoningLoading && selected.evaluation?.scenario.id !== scenario && <div className="report-loading" role="status"><span className="report-loading-label"><span className="tiny-spinner" /> Checking zoning, site conditions, and source records…</span><span className="skeleton-line skeleton-wide" /><span className="skeleton-line skeleton-mid" /></div>}
+            {selected.zoningError && selected.evaluation?.scenario.id !== scenario && <p className="source-warning report-error">{selected.zoningError}</p>}
+            {selected.evaluation?.scenario.id === scenario && <CompactScore evaluation={selected.evaluation} onShowDetails={showFullReport} />}
           </FloatingReport>}
         </section>
         {comparisonIds.length > 0 && <ComparisonBoard comparison={comparison} loading={comparisonLoading} error={comparisonError} onOpen={openComparisonParcel} onClear={clearComparison} scenario={scenario} policy={policy} expanded={comparisonExpanded} onToggle={() => setComparisonExpanded((value) => !value)} count={comparisonIds.length} />}
