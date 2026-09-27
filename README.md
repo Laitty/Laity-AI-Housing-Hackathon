@@ -1,71 +1,77 @@
-# Parcel Atlas · Pittsburgh Two-Unit Housing Screen
+# Parcel Atlas · Pittsburgh Housing Site Screen
 
-An AI for Housing Hackathon Track 1 prototype. It compares **one Allegheny County parcel** against a fixed scenario: **a new building containing two homes**. The interface is in English. A Development Ease Score is shown only when the base residential zoning path can be screened with the current GIS and cited code. It is a relative prototype measure, not an approval or prediction.
+An English-language AI for Housing Hackathon Track 1 prototype for comparing Pittsburgh parcels and three **fixed new-construction scenarios**. It reports mapped evidence, a relative Development Ease Score when a base use path can be screened, unresolved obstacles, possible review steps, and next actions. It does not predict approval.
 
-## Run locally
+## Run and use
 
-Requires Node.js 20.19+ or 22.12+ and an internet connection.
+Requires Node.js 20.19+ or 22.12+ and internet access to public data services.
 
 ```bash
 npm install
-npm run dev
-```
-
-Open the Vite URL printed in the terminal, usually `http://localhost:5173`. For the production server:
-
-```bash
 npm run build
 npm start
 ```
 
-Open `http://localhost:8787`. Set `PORT` to use another port. No API key is needed. The map and evaluation query public GIS and WPRDC services live; service availability and response time vary.
+Open `http://localhost:8787`. For development, use `npm run dev` and open the Vite URL. No API key is required for the public GIS/WPRDC sources or ordinary OpenStreetMap tile use. Follow the [OSM tile policy](https://operations.osmfoundation.org/policies/tiles/) for high-traffic deployment.
 
-## How to use
+1. Choose **Starter home** (one detached unit), **Two-unit home** (two units in one building), or **Small multi-unit** (four units in one building). “Starter” is a product label; the underlying legal use is Single-Unit Detached Residential. Four units are used because the code's Multi-Unit Residential category begins at four.
+2. Search a parcel ID such as `85-N-171`, or click a parcel on the map at zoom 16+. The selected parcel panel shows all three scenario outcomes for the same parcel; click an option for detailed scoring.
+3. Enter 1–5 IDs separated by commas or whitespace, such as `85-N-171, 85-N-163, 2-N-297`, then click **Compare parcels**. Cards appear side by side for the **same** chosen building type, with baseline score or “Review”, leading source findings, unresolved items, and first action.
+4. Open the **Obstacle & evidence checklist**, **Possible approval path**, and **Next actions** in the selected parcel panel. `Confirmed in source` means the cited map or record contains that signal. It does not establish on-site conditions or a final legal determination. `Needs verification` identifies missing or project-specific facts.
+5. Try the policy/resource switches. They simulate allowing the selected use in residential base districts, reducing the published minimum lot area by 20%, and assuming utility capacity. The comparison board retains baseline results and shows the hypothetical result separately. Utility capacity is **not** assigned score points.
 
-1. Search a county block/lot ID, such as **`85-N-171`**, or a full PIN; or zoom to level 16+ and click a parcel.
-2. Read the zoning district and its estimated parcel share. A parcel spanning multiple districts is flagged for review.
-3. Read the **Development Ease** result. Open each scoring row for the calculation, assumption, and source. `Unknown` is not zero points. If the zoning use path is not verified or mapped area falls below the cited minimum lot size, the app withholds the headline score.
-4. Read the assessment use, flood/slope/undermined and city historic district overlaps, then the review checklist. Verify the current zoning map and rules, site conditions, and utilities with the responsible agencies before relying on a finding.
+## Parcel ID format and evidence
 
-For a contrasting example, **`2-N-297`** spans GT-C and RIV-MU districts; the app withholds the score and asks for zoning review. The example `85-N-171` has an assessment use of single-family, so a new two-unit building would also require review of the existing structure even though a prototype score is displayed.
+The [WPRDC assessment data dictionary](https://data.wprdc.org/en/dataset/property-assessments/resource/65855e14-549e-4992-b5be-d629afc676fa) defines `PARID` as a **16-character unique parcel identifier**. The [county parcel GIS layer](https://gisdata.alleghenycounty.us/arcgis/rest/services/OPENDATA/Parcels/MapServer/0) exposes both `PIN` and `MAPBLOCKLOT` as text fields. This app accepts a 16-character alphanumeric PIN or a structured county block-lot ID, then requires **exactly one live county GIS match**. A valid-looking string without a source record is rejected; multiple matches require a full PIN. It never derives a PIN by padding or guessing.
 
-## Scoring model
+Verified live examples on 2026-09-27:
 
-The fixed weights follow the attached Track 1 research memo's starting hypothesis: **zoning/rules 45, parcel conditions 25, environment/terrain 30**. The detailed weights and thresholds below are our **unvalidated product assumptions**, except the cited published minimum lot sizes. Higher points mean fewer *mapped* obstacles for this scenario.
+| Entered block-lot | County `PIN` | Assessment `PARID` | Result |
+| --- | --- | --- | --- |
+| `85-N-171` | `0085N00171000000` | `0085N00171000000` | Exact join |
+| `2-N-297` | `0002N00297000000` | `0002N00297000000` | Exact join |
 
-| Group | Factor | Points | Rule in this prototype |
-| --- | --- | ---: | --- |
-| Zoning & rules | Two-unit base use path | 30 | Screen only a single, GIS `Approved`, ≥99.5%-covering R2/R3/RM district; otherwise unknown and withhold headline score. City review remains necessary. |
-| Zoning & rules | Published minimum lot size | 15 | Compare mapped parcel area with [Chapter 903](https://ecode360.com/45474194): VL 6,000, L 3,000, M 2,400, H 1,200 sq ft. Below the minimum triggers review and withholds the headline score; VH or an unverified district is unknown. Other site standards and exceptions are not checked. |
-| Parcel conditions | Area | 15 | ≥300 m²: 15; ≥200: 10; ≥120: 5; smaller: 0. Prototype bands, not legal minimums. |
-| Parcel conditions | Compactness | 10 | `4π × area ÷ perimeter²`; ≥0.55: 10; ≥0.35: 6; ≥0.2: 3; otherwise 0. This is not a buildable-envelope analysis. |
-| Environment/terrain | Mapped 1% flood hazard | 12 | Share of parcel in `SFHA_TF='T'` in city-hosted FEMA 2026 copy. |
-| Environment/terrain | ≥25% slope | 10 | Share of parcel in city steep-slope polygons. |
-| Environment/terrain | Undermined area | 8 | Share of parcel in city undermined-area polygons. |
+The selected parcel panel displays input, matched county field/value, canonical PIN, returned assessment PARID, and join status with source links. County GIS also contains non-parcel labels such as `COMMON GROUND` and `Not Assessed`, and block-lot suffixes such as `52-H-76-B001` or `15-J-225-0-2`; the app accepts the structured suffixes but rejects those labels as parcel IDs. A county PIN without an assessment record is a valid county match with an **unverified assessment join**, not a fabricated join. This is format and record validation, not ownership or legal-lot verification.
 
-For each of the three environmental factors: <1% overlap earns full points; 1–<10% earns about 70%; 10–<50% earns about 40%; ≥50% earns 0. No returned features from a successful source query means 0% mapped overlap; a failed query means `Unknown`. The app sums known points and shows a **minimum–maximum range** when any factor is unknown. The score is for comparing the *same two-unit scenario* across parcels, not for comparing different housing types.
+## Development Ease Score
 
-The [primary use table in Chapter 911](https://ecode360.com/45476914) and Chapter 903 support only a first pass. GIS `status` and district geometry are source attributes, not a legal permit decision. A positive use screen does not check overlay districts, setbacks, access, parking, stormwater, building code, historic requirements, or administrative approval steps.
+The attached Track 1 research memo suggested starting weights of **zoning/rules 45, parcel conditions 25, environment/terrain 30**. Detailed thresholds below are prototype assumptions and need calibration; published lot minimums come from [§ 903.03](https://ecode360.com/45474194). Scores compare parcels only **within the same housing scenario**.
 
-## Data and provenance
+| Factor | Points | Prototype rule |
+| --- | ---: | --- |
+| Base residential use | 30 | Screen [§ 911.02](https://ecode360.com/45476640): one detached unit in R1D/R1A/R2/R3/RM, two units in R2/R3/RM, four units in RM. Require one GIS `Approved` district covering ≥99.5% of the mapped parcel. Other districts and uncertain coverage remain unverified. |
+| Published minimum lot size | 15 | Compare mapped area to VL 6,000, L 3,000, M 2,400, H 1,200 sq ft. VH and unverified districts remain unknown. Mapped parcel may differ from legal zoning lot. |
+| Parcel area | 15 | Product thresholds in m²: starter 250/160/100; two-unit 300/200/120; four-unit 500/350/250, for 15/10/5/0 points. |
+| Compactness | 10 | `4π × area ÷ perimeter²`: ≥0.55/0.35/0.2 gives 10/6/3 points; otherwise 0. Not a buildable-envelope test. |
+| 1% flood hazard | 12 | Intersect parcel with `SFHA_TF='T'` in the city-hosted FEMA 2026 copy. |
+| ≥25% slope | 10 | Intersect parcel with city steep-slope polygons. |
+| Undermined area | 8 | Intersect parcel with city undermined-area polygons. |
 
-- [Allegheny County Parcel Boundaries](https://data.wprdc.org/dataset/allegheny-county-parcel-boundaries1): searched by PIN/block-lot and used for mapped geometry, area, perimeter, and intersections. The approximately 444 MB county GeoJSON is not stored in this repository.
-- [Allegheny County Property Assessments](https://data.wprdc.org/dataset/property-assessments): queried by `PARID`; current use, recorded lot area, and as-of date are displayed as context. An assessment is not proof that a parcel is vacant or ready to build.
-- [Pittsburgh Zoning Districts](https://data.wprdc.org/dataset/zoning): source GIS district polygons and status. The app calculates parcel overlap; it does not rely only on a parcel centroid.
-- [City-hosted FEMA 2026 flood layer](https://services1.arcgis.com/YZCmUqbcsUpOKfj7/ArcGIS/rest/services/FEMA_2026/FeatureServer/0): 1% hazard polygons, queried from the city's copy, not a live FEMA determination.
-- [Pittsburgh ≥25% slope](https://data.wprdc.org/dataset/25-or-greater-slope) and [Undermined Areas](https://data.wprdc.org/dataset/undermined-areas): mapped overlaps, not site surveys or engineering findings.
-- [City historic districts](https://www.pittsburghpa.gov/Business-Development/City-Planning/Historic-Preservation-Program/Historic-Designations-and-Districts): overlap is a **review flag**, not part of the score. Individual historic sites and other designation types are not screened.
-- [Pittsburgh Water developer guidance](https://www.pgh2o.com/developers-contractors-vendors/developers-manual-standard-details): linked for manual water/sewer review; no parcel-level capacity or connection cost is inferred.
-- [OpenStreetMap standard tiles](https://operations.osmfoundation.org/policies/tiles/) for the Leaflet basemap. No API key is required for normal interactive use; high-traffic deployment should follow tile usage policy or use a suitable provider.
+Each environmental factor gets full points for <1% mapped overlap, about 70% for 1–<10%, about 40% for 10–<50%, and 0 for ≥50%. A failed query makes the factor `Unknown`, widening the score range; it is never treated as a zero-overlap result. The headline score is withheld if base use is not screenable/by-right or the mapped area is below the published minimum. This is deliberately conservative: a variance or existing-lot provision may still be available, but the app cannot decide that.
 
-Each API response includes a query timestamp, source URLs, factor details, overlap shares, review flags, and source errors. Queries run live, so the result can change as source services update.
+## Obstacles, approval path, and interventions
 
-## Current scope and next validation
+- **Zoning:** base use table, mixed or uncertain GIS districts, minimum mapped lot size, and unverified setbacks/overlays. A use not marked by-right leads to **possible** variance, redesign, or map/text amendment discussion, not an assertion that relief will be granted. [§ 922.09](https://ecode360.com/45479034) governs variances.
+- **Environment:** mapped flood, ≥25% slope, and undermined intersections are reported separately with overlap percentages and source links. A GIS hit prompts a site/agency check. [Chapter 906](https://ecode360.com/45475324) contains environmental overlay provisions, including floodplain requirements.
+- **Infrastructure:** water/sewer capacity, easements, connection design, and cost remain unverified. The action links to [Pittsburgh Water's developer guidance](https://www.pgh2o.com/developers-contractors-vendors/developers-manual-standard-details).
+- **Policy and current use:** city historic district GIS intersection is a review signal; current designation and scope must be checked against [historic review guidance](https://www.pittsburghpa.gov/Business-Development/City-Planning/Historic-Preservation-Program/Apply-for-Historic-Review). Assessment use is a dated record, not a field inspection. The [city amendment hub](https://engage.pittsburghpa.gov/pittsburghs-zoning-code-amendment-hub) explains that zoning depends on both map and text and lists current changes.
+- **Applications:** for new buildings, the City's current [Building & Development Application](https://www.pittsburghpa.gov/Business-Development/Permits-Licenses-and-Inspections/Permitting/Building-Development-Application) is the initial route. Four-unit new construction is listed for Site Plan Review by [§ 903.02.E.2 and § 922.04.A.5](https://ecode360.com/45479034). Other reviews/permits are conditional on location and project scope.
 
-This version evaluates **one parcel at a time**. A site made of multiple parcels would require a unioned zoning-lot geometry and separate ownership/assembly checks; scores of individual parcels cannot be added. The prototype does not yet model a buildable envelope, overlay rules, exact permit path, water/sewer capacity, environmental site assessments, current applications, economic feasibility, ownership availability, or construction costs. Historic district and assessment data are review context only. Missing facts are surfaced rather than silently treated as favorable.
+The policy toggles are **counterfactual tests**, not enacted law or verified utility improvements. The use switch applies only to the screened residential base districts. The utility switch changes uncertainty in a hypothetical decision context, **not the numeric score**. A newly displayed counterfactual score means only that this prototype's screening gate opened; it does not establish legal feasibility.
 
-Before competition use, compare 5–10 local case parcels against planning/development professional judgments, test the source layers' coverage and freshness, and calibrate the product thresholds. This score has not been validated as a predictor of approval, time, or cost.
+## API and Jev adapter point
 
-## AI use disclosure
+- `GET /api/parcel-search?q=85-N-171` — exact source record and ID evidence.
+- `GET /api/site-evaluation?pin=85-N-171&scenario=duplex` — one parcel, one scenario, score, source evidence, obstacles, approval path, and actions.
+- `GET /api/scenario-options?pin=85-N-171` — all three scenario score summaries for one parcel.
+- `POST /api/compare` — body `{"ids":["85-N-171","85-N-163"],"scenario":"duplex","policy":{"allowResidentialUse":true,"reduceMinimumLot":false,"assumeUtilityCapacity":false}}`.
+- `POST /api/decision-advice` — body `{"id":"85-N-171","scenario":"duplex"}`; returns the decision contract without the full geometry score response.
+- `GET /api/decision-contract` and `GET /api/scenarios` — provider contract and scenario definitions.
 
-OpenAI Codex assisted with this interface and implementation. Public records come from the linked GIS and WPRDC services. The weights and uncited thresholds are prototype design decisions, not values supplied by the datasets or generated legal findings.
+`server/decision.js` exports `getDecisionAdvice(context)` and currently returns `{provider:"rules-v1",contractVersion:"1.0",obstacles,approvalPath,nextActions}`. This is the stable **Jev integration point**. No Jev credentials or API endpoint were supplied, so there is **no live Jev request** and no hidden AI approval decision. A future provider can replace that function while preserving source links, uncertainty labels, and response fields.
+
+## Limits and validation
+
+This version compares **separate parcels**, not a merged legal zoning lot. Do not add parcel scores to assess assembled sites. It does not establish a buildable envelope, exact permit path, current official flood determination, utility capacity, ownership availability, costs, market feasibility, or approval probability. The historic check covers mapped city districts but not every individual designation. GIS data and assessment records can lag current conditions. Source queries are cached for five minutes per ID to make scenario switching responsive.
+
+Run `npm test` and `npm run build`. Before competition submission, compare 5–10 known local cases with planning/development professionals and recalibrate the product weights and thresholds. OpenAI Codex assisted with the implementation; public records and rules are from linked sources, while uncited thresholds and interventions are prototype choices.

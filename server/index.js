@@ -3,7 +3,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import area from '@turf/area';
 import { intersect } from '@turf/intersect';
-import { SCENARIO, SOURCES, scoreSite } from './score.js';
+import { SCENARIOS, SOURCES, scoreSite } from './score.js';
+import { getDecisionAdvice } from './decision.js';
+import { parseParcelId, validateParcelMatch } from './parcel-id.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 8787;
@@ -14,6 +16,8 @@ const underminedService = 'https://services1.arcgis.com/YZCmUqbcsUpOKfj7/arcgis/
 const floodService = 'https://services1.arcgis.com/YZCmUqbcsUpOKfj7/ArcGIS/rest/services/FEMA_2026/FeatureServer/0/query';
 const historicService = 'https://pghbridgis.pittsburghpa.gov/federated/rest/services/Historic_Districts/MapServer/0/query';
 const assessmentResource = '65855e14-549e-4992-b5be-d629afc676fa';
+const evidenceCache = new Map();
+const CACHE_MS = 5 * 60 * 1000;
 
 function parseBBox(raw) {
   const values = String(raw || '').split(',').map(Number);
@@ -103,6 +107,7 @@ async function lookupAssessment(pin) {
   if (!data.success) throw new Error('Assessment lookup failed');
   const record = data.result?.records?.[0];
   return record ? {
+    parid: record.PARID || null,
     useDescription: record.USEDESC || null,
     lotAreaSqFt: record.LOTAREA ?? null,
     asOfDate: record.ASOFDATE || null,
@@ -145,12 +150,147 @@ async function queryArcGIS(service, params, limit = 5000) {
   return { type: 'FeatureCollection', features, truncated };
 }
 
-function handleError(response, error) {
-  console.error(error);
-  response.status(502).json({ error: error.message || 'The map data service is unavailable' });
+function httpError(status, message) {
+  return Object.assign(new Error(message), { status });
 }
 
+async function resolveParcel(parsed) {
+  const data = await queryArcGIS(parcelService, {
+    where: `${parsed.field}='${parsed.value}'`,
+    outFields: 'PIN,MAPBLOCKLOT,CALCACREAGE,MUNICODE',
+  }, 10);
+  if (data.truncated) throw httpError(409, 'This ID has too many county matches; use a full PIN.');
+  const result = validateParcelMatch(parsed, data.features);
+  if (result.error) throw httpError(data.features.length ? 409 : 404, result.error);
+  return result;
+}
+
+async function fetchSiteEvidence(parsed) {
+  const { feature: parcel, evidence: idEvidence } = await resolveParcel(parsed);
+  const parcelArea = area(parcel);
+  const perimeter = perimeterMeters(parcel.geometry);
+  if (!Number.isFinite(parcelArea) || parcelArea <= 0 || !Number.isFinite(perimeter) || perimeter <= 0) {
+    throw httpError(502, 'Parcel geometry is not measurable');
+  }
+  const compactness = Math.min(1, 4 * Math.PI * parcelArea / perimeter ** 2);
+  const spatialQuery = {
+    geometry: featureBBox(parcel).join(','),
+    geometryType: 'esriGeometryEnvelope',
+    inSR: '4326',
+    spatialRel: 'esriSpatialRelIntersects',
+  };
+  const requests = {
+    zoning: queryArcGIS(zoningService, { ...spatialQuery, outFields: 'zon_new,full_zoning_type,status' }, 1000),
+    flood: queryArcGIS(floodService, { ...spatialQuery, where: "SFHA_TF='T'", outFields: 'FLD_ZONE,ZONE_SUBTY,SFHA_TF' }, 1000),
+    slope: queryArcGIS(slopeService, { ...spatialQuery, outFields: 'slope25' }, 1000),
+    undermined: queryArcGIS(underminedService, { ...spatialQuery, outFields: 'undermined' }, 1000),
+    historic: queryArcGIS(historicService, { ...spatialQuery, outFields: 'type,historic_name' }, 1000),
+    assessment: lookupAssessment(idEvidence.canonicalPIN),
+  };
+  const names = Object.keys(requests);
+  const settled = await Promise.allSettled(Object.values(requests));
+  const data = {};
+  const sourceErrors = {};
+  settled.forEach((result, index) => {
+    const name = names[index];
+    if (result.status === 'fulfilled' && !result.value?.truncated) data[name] = result.value;
+    else sourceErrors[name] = result.status === 'rejected' ? result.reason.message : 'Too many features for a complete check';
+  });
+  let districts = null;
+  if (data.zoning) {
+    try { districts = summarizeZoning(parcel, data.zoning.features, parcelArea); }
+    catch (error) { sourceErrors.zoning = `GIS geometry could not be intersected: ${error.message}`; }
+  }
+  const overlays = {};
+  for (const [name, field] of [['flood', 'FLD_ZONE'], ['slope', null], ['undermined', null], ['historic', 'historic_name']]) {
+    overlays[name] = null;
+    if (data[name]) {
+      try { overlays[name] = overlapSummary(parcel, data[name].features, parcelArea, field); }
+      catch (error) { sourceErrors[name] = `GIS geometry could not be intersected: ${error.message}`; }
+    }
+  }
+  idEvidence.assessmentPARID = data.assessment?.parid || null;
+  idEvidence.assessmentJoin = sourceErrors.assessment ? 'source-unavailable'
+    : data.assessment?.parid === idEvidence.canonicalPIN ? 'exact-PARID-match' : 'no-assessment-record';
+  return {
+    pin: idEvidence.canonicalPIN,
+    blockLot: idEvidence.blockLot,
+    idEvidence,
+    queriedAt: new Date().toISOString(),
+    parcel: { areaSqM: parcelArea, compactness, recordedAcres: parcel.properties.CALCACREAGE },
+    assessment: data.assessment ?? null,
+    districts,
+    overlays,
+    sourceErrors,
+  };
+}
+
+async function loadSiteEvidence(parsed) {
+  const cached = evidenceCache.get(parsed.value);
+  if (cached && cached.expires > Date.now()) return cached.promise;
+  const promise = fetchSiteEvidence(parsed).catch((error) => {
+    evidenceCache.delete(parsed.value);
+    throw error;
+  });
+  evidenceCache.set(parsed.value, { promise, expires: Date.now() + CACHE_MS });
+  return promise;
+}
+
+function cleanPolicy(raw = {}) {
+  const value = raw && typeof raw === 'object' ? raw : {};
+  return {
+    allowResidentialUse: value.allowResidentialUse === true,
+    reduceMinimumLot: value.reduceMinimumLot === true,
+    assumeUtilityCapacity: value.assumeUtilityCapacity === true,
+  };
+}
+
+function scoreEvidence(evidence, scenario, policy = {}) {
+  return scoreSite({
+    areaSqM: evidence.parcel.areaSqM,
+    compactness: evidence.parcel.compactness,
+    districts: evidence.districts,
+    flood: evidence.overlays.flood,
+    slope: evidence.overlays.slope,
+    undermined: evidence.overlays.undermined,
+    scenario,
+    policy,
+  });
+}
+
+function buildEvaluation(evidence, scenario, interventions = {}) {
+  const policy = cleanPolicy(interventions);
+  const score = scoreEvidence(evidence, scenario);
+  const decision = getDecisionAdvice({ ...evidence, scenario, score });
+  const hasPolicy = Object.values(policy).some(Boolean);
+  const hypothetical = hasPolicy ? scoreEvidence(evidence, scenario, policy) : null;
+  const hypotheticalDecision = hypothetical ? getDecisionAdvice({ ...evidence, scenario, score: hypothetical, policy }) : null;
+  const policyImpact = hypothetical ? {
+    intervention: policy,
+    baseline: { displayRange: score.displayRange, minimum: score.minimum, maximum: score.maximum, status: score.status },
+    hypothetical: { displayRange: hypothetical.displayRange, minimum: hypothetical.minimum, maximum: hypothetical.maximum, status: hypothetical.status },
+    newlyScreenable: !score.displayRange && hypothetical.displayRange,
+    scoreChange: score.displayRange && hypothetical.displayRange ? hypothetical.minimum - score.minimum : null,
+    utilityAssumptionOnly: policy.assumeUtilityCapacity && !policy.allowResidentialUse && !policy.reduceMinimumLot,
+    utilityUnknownsAssumedResolved: policy.assumeUtilityCapacity ? 1 : 0,
+    hypotheticalDecision,
+  } : null;
+  return { ...evidence, scenario: SCENARIOS[scenario], score, decision, policyImpact, sources: SOURCES };
+}
+
+function handleError(response, error) {
+  if (!error.status || error.status >= 500) console.error(error);
+  response.status(error.status || 502).json({ error: error.message || 'The map data service is unavailable' });
+}
+
+app.use(express.json({ limit: '16kb' }));
 app.get('/api/health', (_request, response) => response.json({ ok: true }));
+app.get('/api/scenarios', (_request, response) => response.json({ scenarios: Object.values(SCENARIOS) }));
+app.get('/api/decision-contract', (_request, response) => response.json({
+  provider: 'rules-v1', contractVersion: '1.0',
+  futureProvider: 'Jev adapter can replace getDecisionAdvice(context) in server/decision.js',
+  outputFields: ['obstacles', 'approvalPath', 'nextActions'],
+}));
 
 app.get('/api/parcels', async (request, response) => {
   const bbox = parseBBox(request.query.bbox);
@@ -170,14 +310,11 @@ app.get('/api/parcels', async (request, response) => {
 });
 
 app.get('/api/parcel-search', async (request, response) => {
-  const query = String(request.query.q || '').trim().toUpperCase();
-  if (!/^[A-Z0-9 -]{2,24}$/.test(query)) return response.status(400).json({ error: 'Enter a valid parcel ID' });
+  const parsed = parseParcelId(request.query.q);
+  if (!parsed) return response.status(400).json({ error: 'Use a 16-character PIN or a county block-lot ID such as 85-N-171.' });
   try {
-    const data = await queryArcGIS(parcelService, {
-      where: `PIN='${query}' OR MAPBLOCKLOT='${query}'`,
-      outFields: 'PIN,MAPBLOCKLOT,CALCACREAGE,MUNICODE',
-    }, 10);
-    response.json(data);
+    const { feature, evidence } = await resolveParcel(parsed);
+    response.json({ type: 'FeatureCollection', features: [feature], idEvidence: evidence });
   } catch (error) {
     handleError(response, error);
   }
@@ -201,133 +338,82 @@ app.get('/api/zoning', async (request, response) => {
 });
 
 app.get('/api/parcel-zoning', async (request, response) => {
-  const pin = String(request.query.pin || '').trim().toUpperCase();
-  if (!/^[A-Z0-9 -]{2,24}$/.test(pin)) return response.status(400).json({ error: 'Enter a valid parcel ID' });
+  const parsed = parseParcelId(request.query.pin);
+  if (!parsed) return response.status(400).json({ error: 'Use a 16-character PIN or a county block-lot ID.' });
   try {
-    const parcels = await queryArcGIS(parcelService, {
-      where: `PIN='${pin}' OR MAPBLOCKLOT='${pin}'`,
-      outFields: 'PIN,MAPBLOCKLOT',
-    }, 10);
-    const parcel = parcels.features[0];
-    if (!parcel) return response.status(404).json({ error: 'Parcel not found' });
-
-    const parcelArea = area(parcel);
-    if (!Number.isFinite(parcelArea) || parcelArea <= 0) throw new Error('Parcel geometry has no measurable area');
-    const zoning = await queryArcGIS(zoningService, {
-      geometry: featureBBox(parcel).join(','),
-      geometryType: 'esriGeometryEnvelope',
-      inSR: '4326',
-      spatialRel: 'esriSpatialRelIntersects',
-      outFields: 'zon_new,full_zoning_type,legendtype,status',
-    }, 1000);
-    if (zoning.truncated) throw new Error('Too many zoning features to check this parcel completely');
-
-    const districts = new Map();
-    for (const zone of zoning.features) {
-      const shared = intersect({ type: 'FeatureCollection', features: [parcel, zone] });
-      if (!shared) continue;
-      const sharedArea = area(shared);
-      if (sharedArea <= 0.01) continue;
-      const properties = zone.properties || {};
-      const code = properties.zon_new || 'Uncoded';
-      const status = properties.status || null;
-      const key = `${code}|${status || ''}`;
-      const previous = districts.get(key);
-      districts.set(key, {
-        code,
-        name: properties.full_zoning_type || null,
-        status,
-        areaSqM: (previous?.areaSqM || 0) + sharedArea,
-      });
-    }
-
-    const matches = [...districts.values()]
-      .map((district) => ({ ...district, parcelShare: 100 * district.areaSqM / parcelArea }))
-      .sort((a, b) => b.areaSqM - a.areaSqM);
-    response.json({ pin: parcel.properties.PIN, parcelAreaSqM: parcelArea, districts: matches });
+    const evidence = await loadSiteEvidence(parsed);
+    response.json({ pin: evidence.pin, parcelAreaSqM: evidence.parcel.areaSqM, districts: evidence.districts, idEvidence: evidence.idEvidence });
   } catch (error) {
     handleError(response, error);
   }
 });
 
 app.get('/api/site-evaluation', async (request, response) => {
-  const pin = String(request.query.pin || '').trim().toUpperCase();
-  if (!/^[A-Z0-9 -]{2,24}$/.test(pin)) return response.status(400).json({ error: 'Enter a valid parcel ID' });
+  const parsed = parseParcelId(request.query.pin);
+  if (!parsed) return response.status(400).json({ error: 'Use a 16-character PIN or a county block-lot ID.' });
+  const scenario = String(request.query.scenario || 'duplex');
+  if (!SCENARIOS[scenario]) return response.status(400).json({ error: 'Unknown housing scenario' });
   try {
-    const parcels = await queryArcGIS(parcelService, {
-      where: `PIN='${pin}' OR MAPBLOCKLOT='${pin}'`,
-      outFields: 'PIN,MAPBLOCKLOT,CALCACREAGE,MUNICODE',
-    }, 10);
-    const parcel = parcels.features[0];
-    if (!parcel) return response.status(404).json({ error: 'Parcel not found' });
-    const parcelArea = area(parcel);
-    const perimeter = perimeterMeters(parcel.geometry);
-    if (!Number.isFinite(parcelArea) || parcelArea <= 0 || !Number.isFinite(perimeter) || perimeter <= 0) {
-      throw new Error('Parcel geometry is not measurable');
-    }
-    const compactness = Math.min(1, 4 * Math.PI * parcelArea / perimeter ** 2);
-    const geometry = featureBBox(parcel).join(',');
-    const spatialQuery = {
-      geometry,
-      geometryType: 'esriGeometryEnvelope',
-      inSR: '4326',
-      spatialRel: 'esriSpatialRelIntersects',
-    };
-    const requests = {
-      zoning: queryArcGIS(zoningService, { ...spatialQuery, outFields: 'zon_new,full_zoning_type,status' }, 1000),
-      flood: queryArcGIS(floodService, { ...spatialQuery, where: "SFHA_TF='T'", outFields: 'FLD_ZONE,ZONE_SUBTY,SFHA_TF' }, 1000),
-      slope: queryArcGIS(slopeService, { ...spatialQuery, outFields: 'slope25' }, 1000),
-      undermined: queryArcGIS(underminedService, { ...spatialQuery, outFields: 'undermined' }, 1000),
-      historic: queryArcGIS(historicService, { ...spatialQuery, outFields: 'type,historic_name' }, 1000),
-      assessment: lookupAssessment(parcel.properties.PIN),
-    };
-    const names = Object.keys(requests);
-    const settled = await Promise.allSettled(Object.values(requests));
-    const data = {};
-    const sourceErrors = {};
-    settled.forEach((result, index) => {
-      const name = names[index];
-      if (result.status === 'fulfilled' && !result.value?.truncated) data[name] = result.value;
-      else sourceErrors[name] = result.status === 'rejected' ? result.reason.message : 'Too many features for a complete check';
-    });
+    const evidence = await loadSiteEvidence(parsed);
+    response.json(buildEvaluation(evidence, scenario));
+  } catch (error) {
+    handleError(response, error);
+  }
+});
 
-    const districts = data.zoning ? summarizeZoning(parcel, data.zoning.features, parcelArea) : null;
-    const overlays = {};
-    for (const [name, field] of [['flood', 'FLD_ZONE'], ['slope', null], ['undermined', null], ['historic', 'historic_name']]) {
-      overlays[name] = data[name] ? overlapSummary(parcel, data[name].features, parcelArea, field) : null;
-    }
-    const score = scoreSite({
-      areaSqM: parcelArea,
-      compactness,
-      districts,
-      flood: overlays.flood,
-      slope: overlays.slope,
-      undermined: overlays.undermined,
-    });
-    const review = [...score.review];
-    if (districts?.length > 1) review.push('The parcel intersects multiple base zoning districts.');
-    if (districts?.some((district) => district.status !== 'Approved')) review.push('A zoning GIS status is pending or not recorded; verify the official map.');
-    if (overlays.historic?.share > 0) review.push('City historic district overlap: confirm preservation review requirements.');
-    if (data.assessment?.useDescription && !data.assessment.useDescription.toUpperCase().includes('VACANT')) {
-      review.push('Assessment data suggests an existing use or structure; demolition or reuse is outside this screening.');
-    }
-    if (data.assessment?.multipleRecords) review.push('Multiple assessment records match this parcel ID.');
-    review.push('Water and sewer capacity and connection costs are not verified by this tool.');
+app.get('/api/scenario-options', async (request, response) => {
+  const parsed = parseParcelId(request.query.pin);
+  if (!parsed) return response.status(400).json({ error: 'Use a 16-character PIN or a county block-lot ID.' });
+  try {
+    const evidence = await loadSiteEvidence(parsed);
+    response.json({ pin: evidence.pin, blockLot: evidence.blockLot, options: Object.keys(SCENARIOS).map((key) => {
+      const score = scoreEvidence(evidence, key);
+      return { scenario: SCENARIOS[key], score: {
+        displayRange: score.displayRange, minimum: score.minimum, maximum: score.maximum,
+        status: score.status, useFinding: score.useFinding,
+      } };
+    }) });
+  } catch (error) {
+    handleError(response, error);
+  }
+});
 
-    response.json({
-      pin: parcel.properties.PIN,
-      blockLot: parcel.properties.MAPBLOCKLOT,
-      scenario: SCENARIO,
-      queriedAt: new Date().toISOString(),
-      parcel: { areaSqM: parcelArea, compactness, recordedAcres: parcel.properties.CALCACREAGE },
-      assessment: data.assessment ?? null,
-      districts,
-      overlays,
-      score,
-      review,
-      sourceErrors,
-      sources: SOURCES,
-    });
+app.post('/api/compare', async (request, response) => {
+  const ids = request.body?.ids;
+  const scenario = String(request.body?.scenario || 'duplex');
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 5 || !SCENARIOS[scenario]) {
+    return response.status(400).json({ error: 'Provide 1–5 parcel IDs and a valid housing scenario.' });
+  }
+  const parsed = ids.map(parseParcelId);
+  if (parsed.some((entry) => !entry)) return response.status(400).json({ error: 'Each ID must be a 16-character PIN or county block-lot ID.' });
+  if (new Set(parsed.map((entry) => entry.value)).size !== parsed.length) {
+    return response.status(400).json({ error: 'Enter each parcel ID only once.' });
+  }
+  const policy = cleanPolicy(request.body?.policy);
+  const results = [];
+  const seenPins = new Set();
+  for (const entry of parsed) {
+    try {
+      const evidence = await loadSiteEvidence(entry);
+      if (seenPins.has(evidence.pin)) results.push({ requested: entry.value, error: 'This is the same county parcel as an earlier ID in the comparison.' });
+      else {
+        seenPins.add(evidence.pin);
+        results.push({ requested: entry.value, evaluation: buildEvaluation(evidence, scenario, policy) });
+      }
+    } catch (error) {
+      results.push({ requested: entry.value, error: error.message });
+    }
+  }
+  response.json({ scenario: SCENARIOS[scenario], policy, results, queriedAt: new Date().toISOString() });
+});
+
+app.post('/api/decision-advice', async (request, response) => {
+  const parsed = parseParcelId(request.body?.id);
+  const scenario = String(request.body?.scenario || 'duplex');
+  if (!parsed || !SCENARIOS[scenario]) return response.status(400).json({ error: 'Provide a valid parcel ID and housing scenario.' });
+  try {
+    const evaluation = buildEvaluation(await loadSiteEvidence(parsed), scenario);
+    response.json({ pin: evaluation.pin, scenario: evaluation.scenario, idEvidence: evaluation.idEvidence, decision: evaluation.decision });
   } catch (error) {
     handleError(response, error);
   }

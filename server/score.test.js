@@ -46,3 +46,33 @@ test('withholds the headline score when mapped area is below the published minim
   assert.equal(result.displayRange, false);
   assert.match(result.status, /Minimum lot size/);
 });
+
+test('changes use screening when the same parcel switches housing scenario', () => {
+  const common = { areaSqM: 400, compactness: 0.6, districts: r2,
+    flood: noOverlap, slope: noOverlap, undermined: noOverlap };
+  assert.equal(scoreSite({ ...common, scenario: 'starter' }).displayRange, true);
+  assert.equal(scoreSite({ ...common, scenario: 'duplex' }).displayRange, true);
+  const fourplex = scoreSite({ ...common, scenario: 'fourplex' });
+  assert.equal(fourplex.useFinding, 'not-listed-by-right');
+  assert.equal(fourplex.displayRange, false);
+});
+
+test('policy use permission can open a hypothetical screen without rewriting baseline', () => {
+  const common = { areaSqM: 540, compactness: 0.6,
+    districts: [{ code: 'R1D-L', status: 'Approved', parcelShare: 100 }],
+    flood: noOverlap, slope: noOverlap, undermined: noOverlap, scenario: 'duplex' };
+  const baseline = scoreSite(common);
+  const changed = scoreSite({ ...common, policy: { allowResidentialUse: true } });
+  assert.equal(baseline.displayRange, false);
+  assert.equal(changed.displayRange, true);
+  assert.equal(changed.minimum - baseline.minimum, 30);
+});
+
+test('a 20% lot-minimum reduction opens only a hypothetical screen', () => {
+  const common = { areaSqM: 240, compactness: 0.6, districts: r2,
+    flood: noOverlap, slope: noOverlap, undermined: noOverlap, scenario: 'duplex' };
+  assert.equal(scoreSite(common).displayRange, false);
+  const changed = scoreSite({ ...common, policy: { reduceMinimumLot: true } });
+  assert.equal(changed.displayRange, true);
+  assert.equal(changed.effectiveMinimumSqFt, 2400);
+});
