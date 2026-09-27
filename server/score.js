@@ -86,13 +86,15 @@ export function scoreSite({ areaSqM, compactness, districts, flood, slope, under
   const knownWeight = items.reduce((sum, entry) => sum + (entry.earned === null ? 0 : entry.weight), 0);
   const minimum = items.reduce((sum, entry) => sum + (entry.earned ?? 0), 0);
   const maximum = minimum + (100 - knownWeight);
+  const displayRange = baseUseScreened && lotPoints !== 0;
   return {
     items,
     knownWeight,
     minimum,
     maximum,
-    displayRange: baseUseScreened,
-    status: baseUseScreened ? 'Preliminary screening range' : 'Zoning review required before a score',
+    displayRange,
+    status: !baseUseScreened ? 'Zoning review required before a score'
+      : lotPoints === 0 ? 'Minimum lot size review required before a score' : 'Preliminary screening range',
     review,
   };
 }

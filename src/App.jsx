@@ -54,7 +54,7 @@ function ScorePanel({ evaluation }) {
     <div className="evaluation-heading"><span>DEVELOPMENT EASE · PROTOTYPE</span><small>NEW TWO-UNIT HOUSING</small></div>
     <div className="score-summary">
       <strong>{score.displayRange ? (score.minimum === score.maximum ? `${score.minimum}` : `${score.minimum}–${score.maximum}`) : 'Review required'}</strong>
-      <span>{score.displayRange ? '/ 100 · preliminary range' : 'Zoning use path unverified'}</span>
+      <span>{score.displayRange ? '/ 100 · preliminary range' : score.status}</span>
     </div>
     <p className="score-caption">{score.knownWeight}/100 points have data for this initial check. {score.knownWeight < 100 ? 'Unknown factors widen the range. ' : ''}This is a relative screening score, not a permit decision.</p>
     {SCORE_GROUPS.map((group) => {

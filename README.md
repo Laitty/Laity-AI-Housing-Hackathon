@@ -24,7 +24,7 @@ Open `http://localhost:8787`. Set `PORT` to use another port. No API key is need
 
 1. Search a county block/lot ID, such as **`85-N-171`**, or a full PIN; or zoom to level 16+ and click a parcel.
 2. Read the zoning district and its estimated parcel share. A parcel spanning multiple districts is flagged for review.
-3. Read the **Development Ease** result. Open each scoring row for the calculation, assumption, and source. `Unknown` is not zero points. If the zoning use path is not verified, the app withholds the headline score.
+3. Read the **Development Ease** result. Open each scoring row for the calculation, assumption, and source. `Unknown` is not zero points. If the zoning use path is not verified or mapped area falls below the cited minimum lot size, the app withholds the headline score.
 4. Read the assessment use, flood/slope/undermined and city historic district overlaps, then the review checklist. Verify the current zoning map and rules, site conditions, and utilities with the responsible agencies before relying on a finding.
 
 For a contrasting example, **`2-N-297`** spans GT-C and RIV-MU districts; the app withholds the score and asks for zoning review. The example `85-N-171` has an assessment use of single-family, so a new two-unit building would also require review of the existing structure even though a prototype score is displayed.
@@ -36,7 +36,7 @@ The fixed weights follow the attached Track 1 research memo's starting hypothesi
 | Group | Factor | Points | Rule in this prototype |
 | --- | --- | ---: | --- |
 | Zoning & rules | Two-unit base use path | 30 | Screen only a single, GIS `Approved`, ≥99.5%-covering R2/R3/RM district; otherwise unknown and withhold headline score. City review remains necessary. |
-| Zoning & rules | Published minimum lot size | 15 | Compare mapped parcel area with [Chapter 903](https://ecode360.com/45474194): VL 6,000, L 3,000, M 2,400, H 1,200 sq ft. VH or an unverified district is unknown. Other site standards and exceptions are not checked. |
+| Zoning & rules | Published minimum lot size | 15 | Compare mapped parcel area with [Chapter 903](https://ecode360.com/45474194): VL 6,000, L 3,000, M 2,400, H 1,200 sq ft. Below the minimum triggers review and withholds the headline score; VH or an unverified district is unknown. Other site standards and exceptions are not checked. |
 | Parcel conditions | Area | 15 | ≥300 m²: 15; ≥200: 10; ≥120: 5; smaller: 0. Prototype bands, not legal minimums. |
 | Parcel conditions | Compactness | 10 | `4π × area ÷ perimeter²`; ≥0.55: 10; ≥0.35: 6; ≥0.2: 3; otherwise 0. This is not a buildable-envelope analysis. |
 | Environment/terrain | Mapped 1% flood hazard | 12 | Share of parcel in `SFHA_TF='T'` in city-hosted FEMA 2026 copy. |

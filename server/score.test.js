@@ -38,3 +38,11 @@ test('scores a mapped flood intersection as a partial factor', () => {
   assert.equal(result.items.find((entry) => entry.key === 'flood').earned, 5);
   assert.ok(result.review.some((entry) => entry.includes('flood')));
 });
+
+test('withholds the headline score when mapped area is below the published minimum', () => {
+  const result = scoreSite({ areaSqM: 200, compactness: 0.6, districts: r2,
+    flood: noOverlap, slope: noOverlap, undermined: noOverlap });
+  assert.equal(result.items.find((entry) => entry.key === 'lot-minimum').earned, 0);
+  assert.equal(result.displayRange, false);
+  assert.match(result.status, /Minimum lot size/);
+});
