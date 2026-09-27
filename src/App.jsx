@@ -17,8 +17,6 @@ import {
   X,
 } from 'lucide-react';
 
-const PARCEL_SOURCE = 'https://data.wprdc.org/dataset/allegheny-county-parcel-boundaries1';
-const ZONING_SOURCE = 'https://data.wprdc.org/dataset/zoning';
 const CITY_CENTER = [40.4406, -79.9959];
 const CITY_BOUNDS = [[40.3616, -80.0954], [40.5010, -79.8657]];
 const CITY_MASK_EXTENT = [[40.2, -80.3], [40.2, -79.6], [40.7, -79.6], [40.7, -80.3], [40.2, -80.3]];
@@ -725,17 +723,13 @@ export default function App() {
           <div className="brand-divider" />
           <div className="brand-location">PITTSBURGH, PA</div>
         </div>
-        <div className="topbar-right">
-          <span className="topbar-tag"><span className="live-dot" /> LIVE PUBLIC DATA</span>
-          <span className="topbar-step">SITE EXPLORER <strong>02 / 03</strong></span>
-        </div>
+        <h1 className="topbar-slogan">From parcel <em>to possibility.</em></h1>
       </header>
 
       <main className={`workspace ${comparisonIds.length ? 'compare-open' : ''}`}>
         <aside className="sidebar">
           <div className="sidebar-content">
             <div className="eyebrow"><span>01</span> SITE EXPLORATION <ArrowDownRight size={16} /></div>
-            <h1 className="hero-title">From parcel<br /><em>to possibility.</em></h1>
             <p className="intro-copy">Explore housing options, rules, and risks for real Pittsburgh parcels.</p>
 
             <form className="search-box" onSubmit={searchParcel}>
@@ -795,10 +789,7 @@ export default function App() {
               </section></div>
             </details>
 
-            <div className="sidebar-guide"><MapPin size={17} /><span>{selected ? `Viewing ${selected.properties.MAPBLOCKLOT || selected.pin} on the map` : 'Search an ID or select a parcel to open its site report on the map.'}</span></div>
           </div>
-
-          <div className="sidebar-footer"><span>DATA SOURCES</span><DataLink href={PARCEL_SOURCE}>County parcels</DataLink><DataLink href={ZONING_SOURCE}>City zoning</DataLink></div>
         </aside>
 
         <section className={`map-area ${selected ? 'has-selection' : ''} ${comparisonExpanded ? 'comparison-expanded' : ''} ${boundaryStatus === 'loading' && zoom < MIN_ZONING_ZOOM ? 'city-boundary-loading' : ''}`} ref={mapArea} aria-label="Pittsburgh parcel map">
