@@ -23,13 +23,6 @@ const MIN_ZONING_ZOOM = 13;
 const MIN_PARCEL_ZOOM = 16;
 const PARCEL_FOCUS_MAX_ZOOM = 18.75;
 
-function zoningColor(properties = {}) {
-  const category = String(properties.legendtype || '').trim().toLowerCase();
-  if (category.includes('residential')) return '#6f9e8d';
-  if (category.includes('planned') || category.includes('parks') || category.includes('hillside') || category.includes('public realm')) return '#b4a88e';
-  return '#b7929a';
-}
-
 async function getJSON(url, signal, options = {}) {
   const response = await fetch(url, { signal, ...options });
   const data = await response.json();
@@ -353,6 +346,7 @@ function ComparisonBoard({ comparison, loading, error, onOpen, onClear, scenario
 }
 
 export default function App() {
+  const workspaceRef = useRef(null);
   const mapElement = useRef(null);
   const mapArea = useRef(null);
   const map = useRef(null);
@@ -361,15 +355,14 @@ export default function App() {
   const cityMaskShape = useRef(null);
   const cityBounds = useRef(L.latLngBounds(CITY_BOUNDS));
   const parcelLayer = useRef(null);
-  const zoningLayer = useRef(null);
   const selectedLayer = useRef(null);
   const parcelRequest = useRef(null);
-  const zoningRequest = useRef(null);
   const parcelZoningRequest = useRef(null);
   const scenarioRef = useRef('duplex');
   const selectedRef = useRef(null);
   const comparisonExpandedRef = useRef(false);
   const sidebarReport = useRef(null);
+  const sidebarDrag = useRef(null);
 
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(null);
@@ -383,15 +376,53 @@ export default function App() {
   const [comparisonExpanded, setComparisonExpanded] = useState(false);
   const [boundaryStatus, setBoundaryStatus] = useState('loading');
   const [policy, setPolicy] = useState({ allowResidentialUse: false, reduceMinimumLot: false, assumeUtilityCapacity: false });
-  const [layers, setLayers] = useState({ parcels: true, zoning: true });
+  const [sidebarWidth, setSidebarWidth] = useState(390);
   const [zoom, setZoom] = useState(12);
   const [parcelCount, setParcelCount] = useState(0);
-  const [zoningCount, setZoningCount] = useState(0);
-  const [loading, setLoading] = useState({ parcels: false, zoning: false, search: false });
+  const [loading, setLoading] = useState({ parcels: false, search: false });
   const [notice, setNotice] = useState('');
   scenarioRef.current = scenario;
   selectedRef.current = selected?.pin || null;
   comparisonExpandedRef.current = comparisonExpanded;
+
+  const clampSidebarWidth = useCallback((width) => {
+    const available = workspaceRef.current?.clientWidth || window.innerWidth;
+    return Math.round(Math.max(320, Math.min(width, Math.min(720, available * .55))));
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceRef.current) return;
+    const observer = new ResizeObserver(() => {
+      if (window.matchMedia('(min-width: 961px)').matches) setSidebarWidth((width) => clampSidebarWidth(width));
+    });
+    observer.observe(workspaceRef.current);
+    return () => observer.disconnect();
+  }, [clampSidebarWidth]);
+
+  function startSidebarResize(event) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    sidebarDrag.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: sidebarWidth };
+  }
+
+  function moveSidebarResize(event) {
+    if (sidebarDrag.current?.pointerId !== event.pointerId) return;
+    setSidebarWidth(clampSidebarWidth(sidebarDrag.current.startWidth + event.clientX - sidebarDrag.current.startX));
+  }
+
+  function stopSidebarResize(event) {
+    if (sidebarDrag.current?.pointerId !== event.pointerId) return;
+    sidebarDrag.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
+  function onSidebarResizeKeyDown(event) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+    event.preventDefault();
+    const step = event.shiftKey ? 40 : 10;
+    setSidebarWidth((width) => clampSidebarWidth(event.key === 'Home' ? 320 : event.key === 'End' ? 720 : width + (event.key === 'ArrowRight' ? step : -step)));
+  }
 
   const focusParcel = useCallback((feature) => {
     const currentMap = map.current;
@@ -499,7 +530,6 @@ export default function App() {
     instance.getPane('cityMask').style.pointerEvents = 'none';
     cityMaskLayer.current = L.layerGroup().addTo(instance);
     cityBoundaryLayer.current = L.layerGroup().addTo(instance);
-    zoningLayer.current = L.layerGroup().addTo(instance);
     parcelLayer.current = L.layerGroup().addTo(instance);
     selectedLayer.current = L.layerGroup().addTo(instance);
     map.current = instance;
@@ -511,12 +541,12 @@ export default function App() {
       const rings = cityMaskRings(data);
       if (rings.length < 2) throw new Error('No usable city boundary polygons were returned');
       cityMaskShape.current = L.polygon(rings, {
-        pane: 'cityMask', stroke: false, fillColor: '#f3f5ef', fillOpacity: 1,
+        pane: 'cityMask', stroke: false, fillColor: '#f5f7f4', fillOpacity: 1,
         fillRule: 'evenodd', interactive: false,
       });
       if (instance.getZoom() < MIN_ZONING_ZOOM && !selectedRef.current) cityMaskShape.current.addTo(cityMaskLayer.current);
       const outline = L.geoJSON(data, {
-        style: { color: '#2c6b61', weight: 2.4, opacity: 0.9, fillOpacity: 0 },
+        style: { color: '#354d42', weight: 2.5, opacity: 0.9, fillOpacity: 0 },
         interactive: false,
       }).addTo(cityBoundaryLayer.current);
       if (outline.getBounds().isValid()) cityBounds.current = outline.getBounds();
@@ -527,10 +557,18 @@ export default function App() {
       setNotice(`The official city boundary is unavailable: ${error.message}`);
     });
 
+    let resizeFrame;
+    const mapResizeObserver = new ResizeObserver(() => {
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => instance.invalidateSize({ pan: false, debounceMoveend: true }));
+    });
+    mapResizeObserver.observe(mapArea.current);
+
     return () => {
+      mapResizeObserver.disconnect();
+      cancelAnimationFrame(resizeFrame);
       boundaryController.abort();
       parcelRequest.current?.abort();
-      zoningRequest.current?.abort();
       parcelZoningRequest.current?.abort();
       instance.remove();
       map.current = null;
@@ -549,9 +587,7 @@ export default function App() {
       else if (!shouldMask && cityMaskLayer.current.hasLayer(cityMaskShape.current)) cityMaskLayer.current.removeLayer(cityMaskShape.current);
     }
     parcelRequest.current?.abort();
-    zoningRequest.current?.abort();
-
-    if (!layers.parcels || currentZoom < MIN_PARCEL_ZOOM) {
+    if (currentZoom < MIN_PARCEL_ZOOM) {
       parcelLayer.current.clearLayers();
       setParcelCount(0);
       setLoading((previous) => ({ ...previous, parcels: false }));
@@ -562,11 +598,12 @@ export default function App() {
       getJSON(`/api/parcels?bbox=${bbox}`, controller.signal).then((data) => {
         if (controller.signal.aborted) return;
         parcelLayer.current.clearLayers();
+        const parcelStyle = { color: '#29322e', weight: currentZoom >= 18 ? 2.2 : currentZoom >= 17 ? 1.95 : 1.65, opacity: .94, fillColor: '#f3f1e8', fillOpacity: .04, lineJoin: 'round' };
         L.geoJSON(data, {
-          style: { color: selectedRef.current ? '#759186' : '#365d57', weight: selectedRef.current ? 1.05 : 1.25, fillColor: '#e6f0e9', fillOpacity: 0.14 },
+          style: parcelStyle,
           onEachFeature: (feature, layer) => {
-            layer.on('mouseover', () => layer.setStyle({ color: '#dc6838', weight: 2.2, fillOpacity: 0.26 }));
-            layer.on('mouseout', () => layer.setStyle({ color: selectedRef.current ? '#759186' : '#365d57', weight: selectedRef.current ? 1.05 : 1.25, fillOpacity: 0.14 }));
+            layer.on('mouseover', () => layer.setStyle({ color: '#ba7654', weight: parcelStyle.weight + .9, fillOpacity: .2 }));
+            layer.on('mouseout', () => layer.setStyle(parcelStyle));
             layer.on('click', () => selectParcel(feature));
           },
         }).addTo(parcelLayer.current);
@@ -578,36 +615,7 @@ export default function App() {
         if (!controller.signal.aborted) setLoading((previous) => ({ ...previous, parcels: false }));
       });
     }
-
-    if (!layers.zoning || currentZoom < MIN_ZONING_ZOOM) {
-      zoningLayer.current.clearLayers();
-      setZoningCount(0);
-      setLoading((previous) => ({ ...previous, zoning: false }));
-    } else {
-      const controller = new AbortController();
-      zoningRequest.current = controller;
-      setLoading((previous) => ({ ...previous, zoning: true }));
-      getJSON(`/api/zoning?bbox=${bbox}`, controller.signal).then((data) => {
-        if (controller.signal.aborted) return;
-        zoningLayer.current.clearLayers();
-        L.geoJSON(data, {
-          style: (feature) => ({
-            color: zoningColor(feature.properties),
-            weight: 1,
-            fillColor: zoningColor(feature.properties),
-            fillOpacity: 0.22,
-          }),
-          interactive: false,
-        }).addTo(zoningLayer.current);
-        setZoningCount(data.features.length);
-        if (data.truncated) setNotice('There are too many zoning areas in this view. Zoom in to see the full result.');
-      }).catch((error) => {
-        if (error.name !== 'AbortError') setNotice(`Could not load zoning: ${error.message}`);
-      }).finally(() => {
-        if (!controller.signal.aborted) setLoading((previous) => ({ ...previous, zoning: false }));
-      });
-    }
-  }, [layers.parcels, layers.zoning, selectParcel]);
+  }, [selectParcel]);
 
   useEffect(() => {
     const currentMap = map.current;
@@ -715,10 +723,6 @@ export default function App() {
     });
   }
 
-  function toggleLayer(name) {
-    setLayers((previous) => ({ ...previous, [name]: !previous[name] }));
-  }
-
   const acreage = Number(selected?.properties.CALCACREAGE);
   const areaLabel = Number.isFinite(acreage) && acreage > 0
     ? `${acreage.toLocaleString('en-US', { maximumFractionDigits: 3 })} ac · ${Math.round(acreage * 4046.856).toLocaleString('en-US')} m²`
@@ -742,7 +746,7 @@ export default function App() {
         <h1 className="topbar-slogan">From parcel <em>to possibility.</em></h1>
       </header>
 
-      <main className={`workspace ${comparisonIds.length ? 'compare-open' : ''}`}>
+      <main ref={workspaceRef} className={`workspace ${comparisonIds.length ? 'compare-open' : ''}`} style={{ '--sidebar-width': `${sidebarWidth}px` }}>
         <aside className="sidebar">
           <div className="sidebar-content">
             <div className="eyebrow"><span>01</span> SITE EXPLORATION <ArrowDownRight size={16} /></div>
@@ -779,7 +783,7 @@ export default function App() {
             </section>
 
             <section className="sidebar-disclosure" aria-label="Planning tools">
-              <div className="sidebar-disclosure-heading"><span className="disclosure-icon"><Compass size={16} /></span><span><strong>Planning tools</strong><small>Policy simulation & map layers</small></span></div>
+              <div className="sidebar-disclosure-heading"><span className="disclosure-icon"><Compass size={16} /></span><span><strong>Planning tools</strong><small>Policy simulation</small></span></div>
               <div className="disclosure-body"><section className="policy-controls" aria-label="Hypothetical policy interventions">
                 <strong>Policy / resource simulation</strong>
                 <p>Hypothetical changes only. Source GIS and baseline scores stay visible.</p>
@@ -788,20 +792,6 @@ export default function App() {
                   ['reduceMinimumLot', 'Reduce published lot minimum by 20%'],
                   ['assumeUtilityCapacity', 'Assume utility capacity is available'],
                 ].map(([key, label]) => <label key={key}><input type="checkbox" checked={policy[key]} onChange={(event) => togglePolicy(key, event.target.checked)} />{label}</label>)}
-              </section>
-              <section className="panel-section">
-              <div className="section-heading"><Layers3 size={18} strokeWidth={1.7} /><span>Map layers</span></div>
-              <button className="layer-row" type="button" onClick={() => toggleLayer('parcels')} aria-pressed={layers.parcels}>
-                <span className="layer-symbol parcel-symbol" />
-                <span className="layer-label"><strong>Parcel boundaries</strong><small>County GIS · from zoom 16</small></span>
-                <span className={`switch ${layers.parcels ? 'on' : ''}`}><span /></span>
-              </button>
-              <button className="layer-row" type="button" onClick={() => toggleLayer('zoning')} aria-pressed={layers.zoning}>
-                <span className="layer-symbol zoning-symbol" />
-                <span className="layer-label"><strong>Zoning districts</strong><small>City GIS · from zoom 13</small></span>
-                <span className={`switch ${layers.zoning ? 'on' : ''}`}><span /></span>
-              </button>
-              <div className="legend"><span><i className="legend-residential" />Residential</span><span><i className="legend-mixed" />Other urban</span><span><i className="legend-special" />Special areas</span></div>
               </section></div>
             </section>
 
@@ -813,13 +803,15 @@ export default function App() {
           </div>
         </aside>
 
+        <div className="sidebar-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={320} aria-valuemax={Math.round(Math.max(320, Math.min(720, (workspaceRef.current?.clientWidth || window.innerWidth) * .55)))} aria-valuenow={sidebarWidth} aria-valuetext={`${sidebarWidth} pixels`} title="Drag to resize sidebar" tabIndex={0} onPointerDown={startSidebarResize} onPointerMove={moveSidebarResize} onPointerUp={stopSidebarResize} onPointerCancel={stopSidebarResize} onKeyDown={onSidebarResizeKeyDown}><span aria-hidden="true" /></div>
+
         <section className={`map-area ${selected ? 'has-selection' : ''} ${comparisonExpanded ? 'comparison-expanded' : ''} ${boundaryStatus === 'loading' && zoom < MIN_ZONING_ZOOM ? 'city-boundary-loading' : ''}`} ref={mapArea} aria-label="Pittsburgh parcel map">
           <div ref={mapElement} className="map-canvas" />
           {boundaryStatus === 'loading' && zoom < MIN_ZONING_ZOOM && <div className="city-map-loading" role="status"><span className="tiny-spinner" /> Loading Pittsburgh city boundary…</div>}
           <div className="map-top-left"><span className="map-locator"><LocateFixed size={15} /> UNITED STATES / PENNSYLVANIA / PITTSBURGH</span></div>
           <div className="map-top-right"><button type="button" onClick={showCityOverview}><Compass size={16} /> City overview</button><button type="button" onClick={() => { clearSelection(); map.current?.flyTo(DOWNTOWN, 16, { duration: 1 }); }}><Focus size={16} /> Downtown example</button></div>
-          {boundaryStatus !== 'loading' && layers.parcels && zoom < MIN_PARCEL_ZOOM && !selected && <div className="zoom-hint"><span className="hint-icon"><MousePointer2 size={17} /></span><span><strong>Explore Pittsburgh</strong><small>Search a parcel ID or zoom in to select a site</small></span><ChevronRight size={16} /></div>}
-          <div className="map-bottom-left"><span className="status-pulse" /><span>{loading.parcels || loading.zoning ? 'Loading map data' : zoom >= MIN_PARCEL_ZOOM && layers.parcels ? `${parcelCount.toLocaleString()} parcels · ${zoningCount} zoning areas` : zoom >= MIN_ZONING_ZOOM && layers.zoning ? `${zoningCount} zoning areas · zoom in for parcels` : 'Pittsburgh overview · zoom in for districts'}</span><span className="status-divider" /> <span>ZOOM {zoom}</span></div>
+          {boundaryStatus !== 'loading' && zoom < MIN_PARCEL_ZOOM && !selected && <div className="zoom-hint"><span className="hint-icon"><MousePointer2 size={17} /></span><span><strong>Explore Pittsburgh</strong><small>Search a parcel ID or zoom in to select a site</small></span><ChevronRight size={16} /></div>}
+          <div className="map-bottom-left"><span className="status-pulse" /><span>{loading.parcels ? 'Loading parcel boundaries' : zoom >= MIN_PARCEL_ZOOM ? `${parcelCount.toLocaleString()} parcels in view` : 'Pittsburgh overview · zoom in for parcel boundaries'}</span><span className="status-divider" /> <span>ZOOM {zoom}</span></div>
           <div className="map-north">N <span>↑</span></div>
           {selected && <FloatingReport key={selected.pin} label={selected.properties.MAPBLOCKLOT || selected.pin} onClose={clearSelection} mapAreaRef={mapArea} comparisonExpanded={comparisonExpanded}>
             {selected.zoningLoading && selected.evaluation?.scenario.id !== scenario && <div className="report-loading" role="status"><span className="report-loading-label"><span className="tiny-spinner" /> Checking zoning, site conditions, and source records…</span><span className="skeleton-line skeleton-wide" /><span className="skeleton-line skeleton-mid" /></div>}
