@@ -238,17 +238,21 @@ function FloatingReport({ label, onClose, mapAreaRef, mapRef, parcelBounds, comp
     event.stopPropagation();
     manuallyPlaced.current = true;
     const start = keepInsideMap(currentGeometry());
+    const sheet = sheetRef.current;
+    sheet.classList.add('is-dragging');
+    sheet.style.willChange = mode === 'move' ? 'transform' : 'width, height';
     const onMove = (moveEvent) => moveInteraction(moveEvent);
     const onEnd = (endEvent) => endInteraction(endEvent);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onEnd);
     window.addEventListener('pointercancel', onEnd);
     interaction.current = {
-      mode, pointerId: event.pointerId, x: event.clientX, y: event.clientY, start,
+      mode, pointerId: event.pointerId, x: event.clientX, y: event.clientY, start, preview: start, frame: null,
       cleanup: () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onEnd);
         window.removeEventListener('pointercancel', onEnd);
+        cancelAnimationFrame(interaction.current?.frame);
       },
     };
     setGeometry(start);
@@ -265,12 +269,36 @@ function FloatingReport({ label, onClose, mapAreaRef, mapRef, parcelBounds, comp
     const next = active.mode === 'move'
       ? { ...active.start, left: active.start.left + dx, top: active.start.top + dy }
       : { ...active.start, width: Math.min(maxWidth, Math.max(Math.min(300, maxWidth), active.start.width + dx)), height: Math.min(maxHeight, Math.max(Math.min(230, maxHeight), active.start.height + dy)) };
-    setGeometry(keepInsideMap(next));
+    active.preview = keepInsideMap(next);
+    if (active.frame !== null) return;
+    active.frame = requestAnimationFrame(() => {
+      const sheet = sheetRef.current;
+      if (!sheet) return;
+      if (active.mode === 'move') {
+        sheet.style.transform = `translate3d(${active.preview.left - active.start.left}px, ${active.preview.top - active.start.top}px, 0)`;
+      } else {
+        sheet.style.width = `${active.preview.width}px`;
+        sheet.style.height = `${active.preview.height}px`;
+      }
+      active.frame = null;
+    });
   }
 
   function endInteraction(event) {
-    if (interaction.current?.pointerId !== event.pointerId) return;
-    interaction.current.cleanup();
+    const active = interaction.current;
+    if (active?.pointerId !== event.pointerId) return;
+    active.cleanup();
+    const sheet = sheetRef.current;
+    if (sheet) {
+      sheet.style.left = `${active.preview.left}px`;
+      sheet.style.top = `${active.preview.top}px`;
+      sheet.style.width = `${active.preview.width}px`;
+      sheet.style.height = `${active.preview.height}px`;
+      sheet.style.transform = '';
+      sheet.style.willChange = '';
+      sheet.classList.remove('is-dragging');
+    }
+    setGeometry(active.preview);
     interaction.current = null;
   }
 
@@ -317,13 +345,31 @@ function CompactScore({ evaluation, estimate, onShowDetails }) {
   </div>;
 }
 
-function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, zoningReviewReasons, scrollTargetRef, estimate, onEstimate }) {
+function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, selectedScenario, areaLabel, zoningReviewReasons, scrollTargetRef, estimate, onEstimate }) {
   const { score, overlays, assessment, sourceErrors, queriedAt, decision, idEvidence, districts = [] } = evaluation;
   const [activeTab, setActiveTab] = useState('overview');
+  const scenarioScrollTop = useRef(null);
   const ruleFindings = decision.obstacles.filter((entry) => ['Zoning', 'Policy'].includes(entry.category));
   const riskFindings = decision.obstacles.filter((entry) => ['Environment', 'Infrastructure'].includes(entry.category));
   const keyConstraint = decision.obstacles.find((entry) => entry.status === 'confirmed' && !/^(Base use appears|No mapped|Assessment records)/.test(entry.title));
   const firstVerification = decision.obstacles.find((entry) => entry.status === 'verify');
+
+  function rememberScenarioScroll() {
+    scenarioScrollTop.current = scrollTargetRef.current?.closest('.sidebar-content')?.scrollTop ?? null;
+  }
+
+  function changeScenarioHere(nextScenario) {
+    const report = scrollTargetRef.current;
+    const sidebar = report?.closest('.sidebar-content');
+    const previousTop = scenarioScrollTop.current ?? sidebar?.scrollTop;
+    scenarioScrollTop.current = null;
+    if (report) report.style.minHeight = `${Math.ceil(report.getBoundingClientRect().height)}px`;
+    onScenarioChange(nextScenario);
+    if (sidebar && previousTop != null) {
+      sidebar.scrollTop = previousTop;
+      requestAnimationFrame(() => { if (sidebar.isConnected) sidebar.scrollTop = previousTop; });
+    }
+  }
 
   function changeTab(tab) {
     setActiveTab(tab);
@@ -367,7 +413,7 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, 
           {decision.nextActions[0] && <div className="highlight-action"><span>FIRST ACTION</span><strong>{decision.nextActions[0].title}</strong></div>}
         </div>
         {scenarioOptions?.length > 0 && <section className="scenario-matrix"><h3>Same parcel · housing options</h3><div>
-          {scenarioOptions.map((option) => <button type="button" className={option.scenario.id === evaluation.scenario.id ? 'active' : ''} key={option.scenario.id} onClick={() => onScenarioChange(option.scenario.id)}>
+          {scenarioOptions.map((option) => <button type="button" className={option.scenario.id === selectedScenario ? 'active' : ''} key={option.scenario.id} onPointerDownCapture={rememberScenarioScroll} onClick={() => changeScenarioHere(option.scenario.id)}>
             <span>{option.scenario.title}</span><strong>{scoreLabel(option.score)}</strong>
           </button>)}
         </div><p>Each building type has its own score. A lower number is a harder path for that building, and the range stays visible.</p></section>}
@@ -917,9 +963,10 @@ export default function App() {
               </section></div>
             </section>
 
-            {detailsOpen && selected?.evaluation?.scenario.id === scenario && <section className="sidebar-report" ref={sidebarReport} aria-label={`Full site report for ${selected.properties.MAPBLOCKLOT || selected.pin}`}>
+            {detailsOpen && selected?.evaluation && <section className="sidebar-report" ref={sidebarReport} aria-label={`Full site report for ${selected.properties.MAPBLOCKLOT || selected.pin}`} aria-busy={selected.evaluation.scenario.id !== scenario && selected.zoningLoading}>
               <div className="sidebar-report-heading"><span>FULL SITE REPORT</span><strong>{selected.properties.MAPBLOCKLOT || selected.pin}</strong><button type="button" onClick={addSelectedToComparison}>Add to comparison <ArrowUpRight size={14} /></button></div>
-              <ScorePanel key={selected.pin} evaluation={selected.evaluation} scenarioOptions={selected.scenarioOptions} onScenarioChange={setScenario} areaLabel={areaLabel} zoningReviewReasons={zoningReviewReasons} scrollTargetRef={sidebarReport} estimate={estimate} onEstimate={runEstimate} />
+              {selected.evaluation.scenario.id !== scenario && <p className="scenario-update" role="status">{selected.zoningError ? `Could not update this scenario: ${selected.zoningError}. Showing the previous report.` : 'Updating this scenario… Previous report remains visible.'}</p>}
+              <ScorePanel key={selected.pin} evaluation={selected.evaluation} scenarioOptions={selected.scenarioOptions} onScenarioChange={setScenario} selectedScenario={scenario} areaLabel={areaLabel} zoningReviewReasons={zoningReviewReasons} scrollTargetRef={sidebarReport} estimate={estimate} onEstimate={runEstimate} />
             </section>}
 
           </div>
