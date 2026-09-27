@@ -45,6 +45,43 @@ function DataLink({ href, children }) {
   return <a href={href} target="_blank" rel="noreferrer">{children}<ArrowUpRight size={13} strokeWidth={1.7} /></a>;
 }
 
+const SCORE_GROUPS = ['Zoning & rules', 'Parcel conditions', 'Environment & terrain'];
+const GROUP_WEIGHTS = { 'Zoning & rules': 45, 'Parcel conditions': 25, 'Environment & terrain': 30 };
+
+function ScorePanel({ evaluation }) {
+  const { score, review, overlays, assessment, sourceErrors, queriedAt } = evaluation;
+  return <div className="evaluation-panel">
+    <div className="evaluation-heading"><span>DEVELOPMENT EASE · PROTOTYPE</span><small>NEW TWO-UNIT HOUSING</small></div>
+    <div className="score-summary">
+      <strong>{score.displayRange ? (score.minimum === score.maximum ? `${score.minimum}` : `${score.minimum}–${score.maximum}`) : 'Review required'}</strong>
+      <span>{score.displayRange ? '/ 100 · preliminary range' : 'Zoning use path unverified'}</span>
+    </div>
+    <p className="score-caption">{score.knownWeight}/100 points have data for this initial check. {score.knownWeight < 100 ? 'Unknown factors widen the range. ' : ''}This is a relative screening score, not a permit decision.</p>
+    {SCORE_GROUPS.map((group) => {
+      const entries = score.items.filter((entry) => entry.group === group);
+      const known = entries.reduce((total, entry) => total + (entry.earned ?? 0), 0);
+      const unknown = entries.reduce((total, entry) => total + (entry.earned === null ? entry.weight : 0), 0);
+      return <section className="score-group" key={group}>
+        <div className="score-group-head"><strong>{group}</strong><span>{unknown ? `${known}–${known + unknown}` : known} / {GROUP_WEIGHTS[group]}</span></div>
+        {entries.map((entry) => <details className="score-item" key={entry.key}>
+          <summary><span>{entry.label}</span><b className={entry.earned === null ? 'unknown-points' : ''}>{entry.earned === null ? 'Unknown' : `${entry.earned}/${entry.weight}`}</b></summary>
+          <p>{entry.detail}</p>
+          <DataLink href={entry.source}>View source</DataLink>
+        </details>)}
+      </section>;
+    })}
+    <div className="site-facts">
+      <strong>Recorded use & mapped overlap</strong>
+      <p>Assessment: {assessment?.useDescription || 'Unavailable'}{assessment?.asOfDate ? ` · ${assessment.asOfDate}` : ''} · <DataLink href={evaluation.sources.assessments}>Source</DataLink></p>
+      <p>Flood {overlays.flood ? `${overlays.flood.share.toFixed(1)}%` : 'unknown'} · Steep slope {overlays.slope ? `${overlays.slope.share.toFixed(1)}%` : 'unknown'} · Undermined {overlays.undermined ? `${overlays.undermined.share.toFixed(1)}%` : 'unknown'}</p>
+      <p>City historic district {overlays.historic ? `${overlays.historic.share.toFixed(1)}%` : 'unknown'} (review flag only) · <DataLink href={evaluation.sources.historic}>Source</DataLink></p>
+    </div>
+    <div className="review-list"><strong>Checks before a decision</strong><ul>{review.map((item) => <li key={item}>{item}</li>)}</ul><DataLink href={evaluation.sources.utilities}>Water & sewer process</DataLink></div>
+    {Object.keys(sourceErrors).length > 0 && <p className="source-warning">Unavailable sources: {Object.entries(sourceErrors).map(([name, message]) => `${name} (${message})`).join('; ')}</p>}
+    <p className="evaluation-footer">Queried {new Date(queriedAt).toLocaleString('en-US')}. Flood layer: city-hosted FEMA 2026 copy. Mapped overlaps are estimates. Verify the current code, overlays, and site conditions with the responsible agencies.</p>
+  </div>;
+}
+
 export default function App() {
   const mapElement = useRef(null);
   const map = useRef(null);
@@ -87,8 +124,8 @@ export default function App() {
     const controller = new AbortController();
     parcelZoningRequest.current = controller;
     try {
-      const data = await getJSON(`/api/parcel-zoning?pin=${encodeURIComponent(pin)}`, controller.signal);
-      setSelected((previous) => previous?.pin === pin ? { ...previous, districts: data.districts, zoningLoading: false } : previous);
+      const data = await getJSON(`/api/site-evaluation?pin=${encodeURIComponent(pin)}`, controller.signal);
+      setSelected((previous) => previous?.pin === pin ? { ...previous, districts: data.districts || [], evaluation: data, zoningLoading: false } : previous);
     } catch (error) {
       if (error.name !== 'AbortError') {
         setSelected((previous) => previous?.pin === pin ? { ...previous, zoningLoading: false, zoningError: true } : previous);
@@ -270,8 +307,8 @@ export default function App() {
 
             <section className="scenario-card" aria-label="Selected development scenario">
               <div className="scenario-top"><span>ACTIVE SCENARIO</span><span>01 / SITE SCREEN</span></div>
-              <strong>Small residential infill</strong>
-              <p>Explore a parcel for a small new housing project. Unit count, design, and permitted use still need review.</p>
+              <strong>New two-unit housing</strong>
+              <p>Screen one parcel for a new building containing two homes. The score is an evidence-based prototype.</p>
             </section>
 
             <form className="search-box" onSubmit={searchParcel}>
@@ -328,7 +365,8 @@ export default function App() {
                       </>
                     ) : <strong className="muted">No city zoning overlap found; this parcel may be outside Pittsburgh.</strong>}
                   </div>
-                  <p className="card-footnote">Shares estimate the area where county parcel and city zoning polygons overlap. This does not establish a permitted use or approval.</p>
+                  {selected.evaluation && <ScorePanel evaluation={selected.evaluation} />}
+                  <p className="card-footnote">County parcel and city GIS polygons are intersected for this screening. Each conclusion needs the listed source and local review.</p>
                 </div>
               ) : (
                 <div className="empty-selection"><MousePointer2 size={22} strokeWidth={1.4} /><p>Zoom in and select a parcel<br />to see its ID and zoning</p></div>
