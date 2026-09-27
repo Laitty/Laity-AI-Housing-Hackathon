@@ -1,0 +1,17 @@
+{
+  "scoringStandard": "analysis/ease-score-system.md",
+  "exampleZip": "15213",
+  "areas": {
+    "15213": {
+      "status": "scored",
+      "parcels": 6127,
+      "housingTypes": 4,
+      "rows": 24508,
+      "file": "analysis/ease-15213.jsonl",
+      "readings": "rules",
+      "waterAndSewerNearby": false
+    }
+  },
+  "otherAreas": null,
+  "futureReadings": "Other areas stay empty. A later model may generate readings from analysis/ease-score-system.md. It must not change the rules range, the screened range, or the placed integer."
+}

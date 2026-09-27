@@ -35,7 +35,9 @@ The selected parcel panel displays input, matched county field/value, canonical 
 
 ## Development Ease Score
 
-The same parcel receives a separate 0–100 range for each housing type. The lower bound is the sum of known item scores. Unknown items widen the upper bound, and the range stays visible. The midpoint is used only for ranking and comparison. Published lot minimums come from [§ 903.03](https://ecode360.com/45474194). Full rules, checks, and backtest numbers are in [analysis/ease-score-system.md](analysis/ease-score-system.md).
+The same parcel receives a separate 0–100 range for each housing type. The lower bound is the sum of known item scores. Unknown items widen the upper bound, and the range stays visible. The midpoint is used only for ranking and comparison. A screened range can narrow unknown items from the parcel’s own zoning map. Published lot minimums come from [§ 903.03](https://ecode360.com/45474194). Full rules, checks, and backtest numbers are in [analysis/ease-score-system.md](analysis/ease-score-system.md).
+
+ZIP 15213 is the worked example: [analysis/ease-15213.jsonl](analysis/ease-15213.jsonl) has the rules range, screened range, placed integer, and a rules reading for 6,127 parcels. Every other area is empty. A later model may write those readings from the rules file. It must not change the scores.
 
 | Factor | Points | Rule |
 | --- | ---: | --- |

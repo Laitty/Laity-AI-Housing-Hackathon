@@ -50,6 +50,8 @@ a { color: inherit; }
 .score-explanation h3 { margin: 0 0 6px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #355f4a; }
 .score-explanation p { margin: 0 0 6px; font-size: 12px; line-height: 1.45; color: #243128; }
 .score-explanation p:last-child { margin-bottom: 0; }
+.score-explanation button { margin-top: 8px; border: 1px solid #355f4a; background: #fff; color: #355f4a; border-radius: 8px; padding: 6px 8px; font-size: 11px; font-weight: 700; }
+.score-explanation button:disabled { opacity: .6; }
 .scenario-picker button { border: 1px solid #c3d3c5; background: #f9fbf5; color: #59705e; font-size: 10px; padding: 7px 3px; }
 .scenario-picker button.active { background: #355f4a; border-color: #355f4a; color: #fff; }
 .search-box label { display: block; margin-bottom: 10px; font-size: 11px; font-weight: 700; color: #344b42; }

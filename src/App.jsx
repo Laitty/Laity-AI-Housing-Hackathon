@@ -231,7 +231,7 @@ function CompactScore({ evaluation, onShowDetails }) {
   </div>;
 }
 
-function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, zoningReviewReasons, scrollTargetRef }) {
+function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, zoningReviewReasons, scrollTargetRef, estimate, onEstimate }) {
   const { score, overlays, assessment, sourceErrors, queriedAt, decision, idEvidence, districts = [] } = evaluation;
   const [activeTab, setActiveTab] = useState('overview');
   const ruleFindings = decision.obstacles.filter((entry) => ['Zoning', 'Policy'].includes(entry.category));
@@ -266,6 +266,17 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, 
         <p className="score-caption"><b>Evidence coverage: {score.knownWeight}/100 weighted points.</b> {score.knownWeight < 100 ? 'Unknown factors widen the range. ' : ''}Water and sewer capacity stays unknown on every parcel. This is a relative screening score, not a permit decision.</p>
         <div className={`evidence-coverage ${score.knownWeight < 100 ? 'partial' : 'complete'}`} role="img" aria-label={`${score.knownWeight} of 100 weighted points have source data`}><span style={{ width: `${score.knownWeight}%` }} /></div>
         {evaluation.explanation && <section className="score-explanation"><h3>Why this score</h3><p>{evaluation.explanation.summary}</p><p><b>Highest-impact change.</b> {evaluation.explanation.intervention.sentence}</p></section>}
+        <section className="score-explanation"><h3>Screened range</h3>
+          {estimate?.status === 'ready' ? <>
+            <p><b>{estimate.result.estimatedMinimum}–{estimate.result.estimatedMaximum}</b>. This range uses the confidence rules, not a model. The rules range stays {estimate.result.rulesMinimum}–{estimate.result.rulesMaximum}. {estimate.result.rationale}</p>
+            {estimate.result.applied.map((item) => <p key={item.key}>{item.label}: {item.earned > 0 ? `${item.earned} counted` : ''}{item.earned > 0 && item.withheld > 0 ? ', ' : ''}{item.withheld > 0 ? `${item.withheld} closed` : ''} of {item.weight}.{item.residual > 0 ? ` ${item.residual} still open.` : ''} {item.rationale}</p>)}
+            {estimate.result.stillUnknown.length > 0 && <p>Still open: {estimate.result.stillUnknown.map((item) => `${item.label} ${item.weight}`).join(', ')}.</p>}
+            {estimate.result.agent?.point != null
+              ? <p><b>Agent score {estimate.result.agent.point}.</b> {estimate.result.agent.interpretation}{estimate.result.agent.provider === 'session-placement' ? ' Placed from the open points on this machine. The remote model was not called.' : ''}</p>
+              : <p><b>Agent score withheld.</b> No model key is configured, so no integer is placed inside this range.</p>}
+          </> : <p>{estimate?.error || (estimate?.status === 'running' ? 'Checking nearby parcels…' : 'The rules range above is the standard. The screened range narrows open points from the zoning map and nearby parcels of the same type.')}</p>}
+          <button type="button" onClick={onEstimate} disabled={estimate?.status === 'running'}>Screen the open points</button>
+        </section>
         <div className="overview-highlights" aria-label="Site findings and next step">
           <div className={keyConstraint ? 'highlight-constraint' : score.displayRange ? 'highlight-confirmed' : 'highlight-verify'}><span>{score.displayRange ? 'KEY CONSTRAINT' : 'APPROVAL PATH'}</span><strong>{keyConstraint?.title || (score.displayRange ? 'No mapped constraint flagged' : score.status)}</strong><p>{keyConstraint?.detail || (score.displayRange ? 'Only the screened source layers are covered; check the full rules and site conditions.' : 'Confirm the current use and review route with the City before treating this as a buildable site.')}</p></div>
           <div className="highlight-verify"><span>NEEDS VERIFICATION</span><strong>{firstVerification?.title || 'Confirm site-specific requirements'}</strong></div>
@@ -367,6 +378,7 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [estimate, setEstimate] = useState(null);
   const [scenario, setScenario] = useState('duplex');
   const [comparisonInput, setComparisonInput] = useState('');
   const [comparisonIds, setComparisonIds] = useState([]);
@@ -462,6 +474,7 @@ export default function App() {
     const pin = properties.PIN || properties.MAPBLOCKLOT || 'Unknown parcel';
     const lookupId = requestedId || pin;
     setDetailsOpen(false);
+    setEstimate(null);
     setSelected({ pin, lookupId, properties, districts: [], zoningLoading: true });
     setNotice('');
 
@@ -484,6 +497,7 @@ export default function App() {
     const controller = new AbortController();
     parcelZoningRequest.current = controller;
     setSelected((previous) => previous ? { ...previous, zoningLoading: true, zoningError: null } : previous);
+    setEstimate(null);
     getJSON(`/api/site-evaluation?pin=${encodeURIComponent(selected.lookupId || selected.pin)}&scenario=${scenario}`, controller.signal)
       .then((data) => setSelected((previous) => previous?.pin === selected.pin ? { ...previous, evaluation: data, districts: data.districts || [], zoningLoading: false, zoningError: null } : previous))
       .catch((error) => {
@@ -491,6 +505,15 @@ export default function App() {
       });
     return () => controller.abort();
   }, [scenario]);
+
+  const runEstimate = useCallback(() => {
+    const pin = selected?.lookupId || selected?.pin;
+    if (!pin) return;
+    setEstimate({ status: 'running' });
+    getJSON('/api/ai-score', undefined, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: pin, scenario }) })
+      .then((data) => setEstimate(data))
+      .catch((error) => setEstimate({ status: 'failed', error: error.message }));
+  }, [selected, scenario]);
 
   useEffect(() => {
     if (!comparisonIds.length) return;
@@ -797,7 +820,7 @@ export default function App() {
 
             {detailsOpen && selected?.evaluation?.scenario.id === scenario && <section className="sidebar-report" ref={sidebarReport} aria-label={`Full site report for ${selected.properties.MAPBLOCKLOT || selected.pin}`}>
               <div className="sidebar-report-heading"><span>FULL SITE REPORT</span><strong>{selected.properties.MAPBLOCKLOT || selected.pin}</strong><button type="button" onClick={addSelectedToComparison}>Add to comparison <ArrowUpRight size={14} /></button></div>
-              <ScorePanel key={selected.pin} evaluation={selected.evaluation} scenarioOptions={selected.scenarioOptions} onScenarioChange={setScenario} areaLabel={areaLabel} zoningReviewReasons={zoningReviewReasons} scrollTargetRef={sidebarReport} />
+              <ScorePanel key={selected.pin} evaluation={selected.evaluation} scenarioOptions={selected.scenarioOptions} onScenarioChange={setScenario} areaLabel={areaLabel} zoningReviewReasons={zoningReviewReasons} scrollTargetRef={sidebarReport} estimate={estimate} onEstimate={runEstimate} />
             </section>}
 
           </div>

@@ -1,6 +1,14 @@
 # Development Ease Score
 
-The default score is `ease-v1` (`server/score-ease.js`). Each parcel is scored once for each housing type. The result is a 0–100 range. The lower bound is the sum of the known item scores. Unknown items widen the upper bound. The interface always shows the range. The midpoint, `(lower + upper) / 2`, is used only for ranking and comparison.
+The default score is `ease-v1` (`server/score-ease.js`). Each parcel is scored once for each housing type. The page keeps three results separate.
+
+| Result | Source | What it is |
+|---|---|---|
+| Rules range | The nine items below. No model. | The scoring standard. The lower bound is the sum of the known item scores. Unknown items widen the upper bound. |
+| Screened range | The confidence rules below. No model. | A narrower range inside the rules range. Counted points raise the floor. Closed points lower the ceiling. |
+| Agent score | The model, only when a key is configured. | One integer inside the screened range, plus a reading. The integer cannot move the rules range or the screened range. |
+
+The midpoint of the rules range, `(lower + upper) / 2`, is used only for ranking and comparison. The agent score is not the ranking score. If `MODEL_PROXY_API_KEY` is absent, one integer is still placed inside the screened range: a leftover 1-point use or lot item is counted when that item is already one point short of full, and water and sewer stays at the screened amount. That placement is not the remote model.
 
 ## Housing types
 
@@ -103,6 +111,32 @@ The gap from 0.911 comes from leaving out the road centerline and from scoring t
 
 Two-unit homes use the same weights and do not drive the tuning. Nine issued two-unit permits after the 2019 archive can be joined to that archive: 4 by-right, 3 not listed under the current table, and 2 with an unverified district. Only 4 are by-right and have same-ward controls, all in 2020–2023. Their reference win rate is 0.369 and their choice-set win rate is 0.398. There are 0 such parcels in 2024–2026. Four-unit homes have no verified issued cohort, so they have no win rate.
 
+## Screened range
+
+The screened range does not rescore a known item. It only moves points that the rules range left unknown.
+
+- Use path and minimum lot size. If the largest approved residential base covers at least half the parcel, and at least as much as every non-residential piece combined, count that share of the points the same district would earn if it covered the whole parcel. If the share is below 100%, at least 1 point stays open.
+- The same two items, the other way. If approved non-residential districts cover at least half the parcel and more than the residential share, close that share of the open points. A mapped Hillside, Park, or special district does not keep a 0–40 point gap.
+- Nearby parcels are used only when the parcel’s own map did not already decide the item. At least four nearby parcels of the same housing type must share one approved residential code, with no tie. Their confidence is capped at 70%.
+- Water and sewer. At least four nearby assessed parcels, and at least half of them non-vacant, can count `min(10, round(15 × non-vacant share × 0.67))`. The rest of the 15 stays open. There is still no parcel-level capacity record.
+
+On the 2,034-parcel starter file, parcels with an unknown use path or lot minimum had a median rules width of 65. After these rules, and before any nearby water-and-sewer count, the median width was 25. The reference win rate is unchanged, because ranking still uses the rules range.
+
 ## Explanation
 
-Each result includes an `explanation` built only from the score items. It states the largest known gap (`weight − earned`) and the other housing type or policy switch that raises the midpoint the most. If nothing raises the midpoint, the intervention is none and the point gain is 0. The text is assembled by rules from those numbers.
+The rules reading is built only from the score items. It states the largest known gap (`weight − earned`) and the other housing type or policy switch that raises the midpoint the most. If nothing raises the midpoint, the intervention is none and the point gain is 0. That text is assembled by rules.
+
+The agent may replace the reading after the screened range is fixed. The replacement has to name the largest known gap and stay consistent with the screened bounds. It does not change the points. Without a model key, the rules reading remains, and the integer above is the local placement.
+
+## Worked example
+
+ZIP 15213 is the only area with published scores. Every other area is empty.
+
+| Area | Status | File |
+|---|---|---|
+| 15213 | Scored | [analysis/ease-15213.jsonl](ease-15213.jsonl) |
+| Every other ZIP or neighborhood | Empty | None |
+
+The 15213 file has 6,127 parcels that matched a county parcel boundary, and four housing types for each, 24,508 rows. Fifteen assessment records in that ZIP had no parcel geometry and are omitted. Each row has the rules range, the screened range, one placed integer, the nine item scores, and a reading. The reading is assembled from this file’s rules. No model wrote it. Nearby water and sewer checks were not run for this file, so those 15 points stay open.
+
+A later model may generate readings for areas that are still empty. It should read this file as the scoring standard. It may rewrite the reading. It must not change a known item, the rules range, the screened range, or the placed integer. Until that connection exists, those areas stay empty.

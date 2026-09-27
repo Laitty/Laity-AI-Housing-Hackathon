@@ -9,6 +9,8 @@ import { scoreSiteEase } from './score-ease.js';
 import { explainScore } from './explain-score.js';
 import { getDecisionAdvice } from './decision.js';
 import { parseParcelId, validateParcelMatch } from './parcel-id.js';
+import { loadSubjectFeature, loadNearbyContext } from './nearby-context.js';
+import { evaluateAiScore, placeSessionPoint, retrievalEstimate } from './ai-score.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 8787;
@@ -413,6 +415,33 @@ app.get('/api/site-evaluation', async (request, response) => {
   try {
     const evidence = await loadSiteEvidence(parsed);
     response.json(buildEvaluation(evidence, scenario));
+  } catch (error) {
+    handleError(response, error);
+  }
+});
+
+app.post('/api/ai-score', async (request, response) => {
+  const parsed = parseParcelId(request.body?.id);
+  const scenario = String(request.body?.scenario || 'duplex');
+  if (!parsed || !SCENARIOS[scenario]) return response.status(400).json({ error: 'Provide a valid parcel ID and housing scenario.' });
+  try {
+    const evidence = await loadSiteEvidence(parsed);
+    const evaluation = buildEvaluation(evidence, scenario);
+    const feature = await loadSubjectFeature(evidence.pin);
+    if (!feature) return response.status(404).json({ error: 'The county parcel geometry could not be loaded for nearby retrieval.' });
+    const nearby = await loadNearbyContext(feature);
+    const retrieval = retrievalEstimate(evaluation, nearby);
+    if (!process.env.MODEL_PROXY_API_KEY) {
+      const agent = placeSessionPoint(retrieval, evaluation.explanation);
+      return response.json({ status: 'ready', result: { ...retrieval, agent, pin: evidence.pin, scenario, nearby: { assessedCount: nearby.assessedCount, builtCount: nearby.builtCount, zoningCodes: nearby.zoningCodes } } });
+    }
+    const revised = await evaluateAiScore(evaluation, { ...nearby, drafts: retrieval.applied }, {
+      apiKey: process.env.MODEL_PROXY_API_KEY,
+      baseUrl: process.env.AI_SCORE_BASE_URL || 'https://fast.sbbbbbbbbb.xyz/v1',
+      model: process.env.AI_SCORE_MODEL || 'grok-4.6',
+      narrowed: retrieval,
+    });
+    response.json({ status: 'ready', result: { ...revised, pin: evidence.pin, scenario } });
   } catch (error) {
     handleError(response, error);
   }
