@@ -31,7 +31,7 @@ function zoningColor(properties = {}) {
 async function getJSON(url, signal) {
   const response = await fetch(url, { signal });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
+  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
   return data;
 }
 
@@ -82,7 +82,7 @@ export default function App() {
     const bounds = L.geoJSON(feature).getBounds();
     const point = clickedAt || bounds.getCenter();
     const properties = feature.properties || {};
-    const pin = properties.PIN || properties.MAPBLOCKLOT || '未知地块';
+    const pin = properties.PIN || properties.MAPBLOCKLOT || 'Unknown parcel';
     setSelected({ pin, properties, zoning: null, zoningLoading: true });
     setNotice('');
 
@@ -159,9 +159,9 @@ export default function App() {
           },
         }).addTo(parcelLayer.current);
         setParcelCount(data.features.length);
-        if (data.truncated) setNotice('当前区域地块较多，请继续放大以查看完整结果。');
+        if (data.truncated) setNotice('There are too many parcels in this view. Zoom in to see the full result.');
       }).catch((error) => {
-        if (error.name !== 'AbortError') setNotice(`地块加载失败：${error.message}`);
+        if (error.name !== 'AbortError') setNotice(`Could not load parcels: ${error.message}`);
       }).finally(() => {
         if (!controller.signal.aborted) setLoading((previous) => ({ ...previous, parcels: false }));
       });
@@ -188,9 +188,9 @@ export default function App() {
           interactive: false,
         }).addTo(zoningLayer.current);
         setZoningCount(data.features.length);
-        if (data.truncated) setNotice('当前区域分区较多，请放大地图查看完整结果。');
+        if (data.truncated) setNotice('There are too many zoning areas in this view. Zoom in to see the full result.');
       }).catch((error) => {
-        if (error.name !== 'AbortError') setNotice(`分区加载失败：${error.message}`);
+        if (error.name !== 'AbortError') setNotice(`Could not load zoning: ${error.message}`);
       }).finally(() => {
         if (!controller.signal.aborted) setLoading((previous) => ({ ...previous, zoning: false }));
       });
@@ -215,14 +215,14 @@ export default function App() {
       const data = await getJSON(`/api/parcel-search?q=${encodeURIComponent(term)}`);
       const feature = data.features[0];
       if (!feature) {
-        setNotice('未找到这个地块编号。可尝试完整 PIN，或类似 2-J-129 的编号。');
+        setNotice('Parcel not found. Try a full PIN or a block/lot ID such as 2-J-129.');
         return;
       }
       const bounds = L.geoJSON(feature).getBounds();
       map.current.fitBounds(bounds.pad(1.7), { maxZoom: 17, animate: true });
       selectParcel(feature);
     } catch (error) {
-      setNotice(`搜索失败：${error.message}`);
+      setNotice(`Search failed: ${error.message}`);
     } finally {
       setLoading((previous) => ({ ...previous, search: false }));
     }
@@ -241,7 +241,7 @@ export default function App() {
   const acreage = Number(selected?.properties.CALCACREAGE);
   const areaLabel = Number.isFinite(acreage) && acreage > 0
     ? `${acreage.toLocaleString('en-US', { maximumFractionDigits: 3 })} ac · ${Math.round(acreage * 4046.856).toLocaleString('en-US')} m²`
-    : '暂无面积数据';
+    : 'Area unavailable';
 
   return (
     <div className="app-shell">
@@ -253,7 +253,7 @@ export default function App() {
           <div className="brand-location">PITTSBURGH, PA</div>
         </div>
         <div className="topbar-right">
-          <span className="topbar-tag"><span className="live-dot" /> 实时公开数据</span>
+          <span className="topbar-tag"><span className="live-dot" /> LIVE PUBLIC DATA</span>
           <span className="topbar-step">SITE EXPLORER <strong>01 / 03</strong></span>
         </div>
       </header>
@@ -261,69 +261,69 @@ export default function App() {
       <main className="workspace">
         <aside className="sidebar">
           <div className="sidebar-content">
-            <div className="eyebrow"><span>01</span> 地块探索 <ArrowDownRight size={16} /></div>
-            <h1>从一块地<br /><em>开始。</em></h1>
-            <p className="intro-copy">在地图上找到真实地块，查看边界与规划分区。开发可行性分析，从这里开始。</p>
+            <div className="eyebrow"><span>01</span> SITE EXPLORATION <ArrowDownRight size={16} /></div>
+            <h1>Start with<br /><em>a parcel.</em></h1>
+            <p className="intro-copy">Find a real parcel, explore its boundaries and zoning, then start assessing development feasibility.</p>
 
             <form className="search-box" onSubmit={searchParcel}>
-              <label htmlFor="parcel-search">搜索地块编号</label>
+              <label htmlFor="parcel-search">SEARCH PARCEL ID</label>
               <div className="search-control">
                 <Search size={18} strokeWidth={1.8} />
-                <input id="parcel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如 2-J-129" autoComplete="off" />
-                <button type="submit" aria-label="搜索地块" disabled={loading.search}>{loading.search ? <span className="tiny-spinner" /> : <ArrowUpRight size={18} />}</button>
+                <input id="parcel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="e.g. 2-J-129" autoComplete="off" />
+                <button type="submit" aria-label="Search parcel" disabled={loading.search}>{loading.search ? <span className="tiny-spinner" /> : <ArrowUpRight size={18} />}</button>
               </div>
-              <p>支持完整 PIN 或县级 Block / Lot 编号</p>
+              <p>Use a full PIN or county block/lot ID</p>
             </form>
 
-            {notice && <div className="notice" role="status"><span>!</span>{notice}<button onClick={() => setNotice('')} aria-label="关闭提示"><X size={14} /></button></div>}
+            {notice && <div className="notice" role="status"><span>!</span>{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notice"><X size={14} /></button></div>}
 
             <section className="panel-section">
-              <div className="section-heading"><Layers3 size={18} strokeWidth={1.7} /><span>地图图层</span></div>
+              <div className="section-heading"><Layers3 size={18} strokeWidth={1.7} /><span>Map layers</span></div>
               <button className="layer-row" type="button" onClick={() => toggleLayer('parcels')} aria-pressed={layers.parcels}>
                 <span className="layer-symbol parcel-symbol" />
-                <span className="layer-label"><strong>地块边界</strong><small>Allegheny County GIS</small></span>
+                <span className="layer-label"><strong>Parcel boundaries</strong><small>Allegheny County GIS</small></span>
                 <span className={`switch ${layers.parcels ? 'on' : ''}`}><span /></span>
               </button>
               <button className="layer-row" type="button" onClick={() => toggleLayer('zoning')} aria-pressed={layers.zoning}>
                 <span className="layer-symbol zoning-symbol" />
-                <span className="layer-label"><strong>规划分区</strong><small>City of Pittsburgh GIS</small></span>
+                <span className="layer-label"><strong>Zoning districts</strong><small>City of Pittsburgh GIS</small></span>
                 <span className={`switch ${layers.zoning ? 'on' : ''}`}><span /></span>
               </button>
-              <div className="legend"><span><i className="legend-residential" />住宅相关</span><span><i className="legend-mixed" />其他城区</span><span><i className="legend-special" />特殊区域</span></div>
+              <div className="legend"><span><i className="legend-residential" />Residential</span><span><i className="legend-mixed" />Other urban</span><span><i className="legend-special" />Special areas</span></div>
             </section>
 
             <section className="selection-section">
-              <div className="selection-title"><span>已选地块</span>{selected && <button onClick={clearSelection} aria-label="清除已选地块"><X size={15} /></button>}</div>
+              <div className="selection-title"><span>Selected parcel</span>{selected && <button onClick={clearSelection} aria-label="Clear selected parcel"><X size={15} /></button>}</div>
               {selected ? (
                 <div className="selected-card" ref={selectedCard}>
                   <div className="selected-pin"><MapPin size={17} strokeWidth={1.8} /><span>{selected.properties.MAPBLOCKLOT || selected.pin}</span><Check size={16} /></div>
                   <div className="selected-grid">
-                    <div><span>完整地块 ID</span><strong>{selected.properties.PIN || '暂无'}</strong></div>
-                    <div><span>地块面积</span><strong>{areaLabel}</strong></div>
+                    <div><span>Full parcel ID</span><strong>{selected.properties.PIN || 'Unavailable'}</strong></div>
+                    <div><span>Parcel area</span><strong>{areaLabel}</strong></div>
                   </div>
                   <div className="zone-result">
-                    <span>所选位置的规划分区</span>
-                    {selected.zoningLoading ? <strong className="muted">正在查询…</strong> : selected.zoning ? (
-                      <div className="zone-value"><b>{selected.zoning.zon_new || '—'}</b><strong>{selected.zoning.full_zoning_type || '分区名称未提供'}</strong></div>
-                    ) : <strong className="muted">{selected.zoningError ? '查询暂时失败' : '无匹配分区；可能位于匹兹堡市外'}</strong>}
+                    <span>Zoning at selected point</span>
+                    {selected.zoningLoading ? <strong className="muted">Checking…</strong> : selected.zoning ? (
+                      <div className="zone-value"><b>{selected.zoning.zon_new || '—'}</b><strong>{selected.zoning.full_zoning_type || 'Zoning name unavailable'}</strong></div>
+                    ) : <strong className="muted">{selected.zoningError ? 'Zoning lookup failed' : 'No match; this parcel may be outside Pittsburgh'}</strong>}
                   </div>
-                  <p className="card-footnote">分区按点击位置初筛；一个地块可能涉及多个分区，后续需进一步核对。</p>
+                  <p className="card-footnote">Point-based screening only. A parcel may span multiple districts and requires further review.</p>
                 </div>
               ) : (
-                <div className="empty-selection"><MousePointer2 size={22} strokeWidth={1.4} /><p>放大地图并点击任意地块<br />查看它的编号与规划分区</p></div>
+                <div className="empty-selection"><MousePointer2 size={22} strokeWidth={1.4} /><p>Zoom in and select a parcel<br />to see its ID and zoning</p></div>
               )}
             </section>
           </div>
 
-          <div className="sidebar-footer"><span>数据来源</span><DataLink href={PARCEL_SOURCE}>县地块边界</DataLink><DataLink href={ZONING_SOURCE}>市规划分区</DataLink></div>
+          <div className="sidebar-footer"><span>DATA SOURCES</span><DataLink href={PARCEL_SOURCE}>County parcels</DataLink><DataLink href={ZONING_SOURCE}>City zoning</DataLink></div>
         </aside>
 
-        <section className="map-area" aria-label="匹兹堡地块地图">
+        <section className="map-area" aria-label="Pittsburgh parcel map">
           <div ref={mapElement} className="map-canvas" />
           <div className="map-top-left"><span className="map-locator"><LocateFixed size={15} /> UNITED STATES / PENNSYLVANIA / PITTSBURGH</span></div>
-          <div className="map-top-right"><button type="button" onClick={() => map.current?.flyTo(CITY_CENTER, 12)}><Compass size={16} /> 全市视图</button><button type="button" onClick={() => map.current?.flyTo(DOWNTOWN, 17)}><Focus size={16} /> 市中心示例</button></div>
-          {layers.parcels && zoom < MIN_PARCEL_ZOOM && <div className="zoom-hint"><span className="hint-icon"><MousePointer2 size={17} /></span><span><strong>放大到街区级</strong><small>即可查看并点击真实地块</small></span><ChevronRight size={16} /></div>}
-          <div className="map-bottom-left"><span className="status-pulse" /><span>{loading.parcels || loading.zoning ? '正在加载地图数据' : zoom >= MIN_PARCEL_ZOOM && layers.parcels ? `视野内 ${parcelCount.toLocaleString()} 块地 · ${zoningCount} 个分区` : `${zoningCount} 个分区 · 放大后显示地块`}</span><span className="status-divider" /> <span>ZOOM {zoom}</span></div>
+          <div className="map-top-right"><button type="button" onClick={() => map.current?.flyTo(CITY_CENTER, 12)}><Compass size={16} /> City overview</button><button type="button" onClick={() => map.current?.flyTo(DOWNTOWN, 17)}><Focus size={16} /> Downtown example</button></div>
+          {layers.parcels && zoom < MIN_PARCEL_ZOOM && <div className="zoom-hint"><span className="hint-icon"><MousePointer2 size={17} /></span><span><strong>Zoom to block level</strong><small>to view and select individual parcels</small></span><ChevronRight size={16} /></div>}
+          <div className="map-bottom-left"><span className="status-pulse" /><span>{loading.parcels || loading.zoning ? 'Loading map data' : zoom >= MIN_PARCEL_ZOOM && layers.parcels ? `${parcelCount.toLocaleString()} parcels · ${zoningCount} zoning areas` : `${zoningCount} zoning areas · zoom in for parcels`}</span><span className="status-divider" /> <span>ZOOM {zoom}</span></div>
           <div className="map-north">N <span>↑</span></div>
         </section>
       </main>

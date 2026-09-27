@@ -1,5 +1,5 @@
 :root {
-  font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   color: #22332f;
   background: #f5f2eb;
   font-synthesis: none;
@@ -25,7 +25,7 @@ a { color: inherit; }
 .brand-divider { height: 22px; width: 1px; margin: 0 4px; background: #c8cbc0; }
 .brand-location, .topbar-step { font-size: 10px; font-weight: 700; letter-spacing: .19em; color: #66746d; white-space: nowrap; }
 .topbar-right { gap: 28px; }
-.topbar-tag { font-family: 'Noto Sans SC', sans-serif; color: #42655a; font-size: 11px; display: flex; align-items: center; gap: 9px; }
+.topbar-tag { font-family: 'DM Sans', sans-serif; color: #42655a; font-size: 11px; display: flex; align-items: center; gap: 9px; }
 .live-dot, .status-pulse { width: 7px; height: 7px; border-radius: 50%; background: #4d987a; box-shadow: 0 0 0 4px #cfe7d9; display: inline-block; flex: 0 0 7px; }
 .topbar-step strong { color: #d36c42; margin-left: 8px; }
 
@@ -35,7 +35,7 @@ a { color: inherit; }
 .eyebrow { display: flex; align-items: center; gap: 11px; font-size: 10px; font-weight: 700; letter-spacing: .2em; color: #517265; }
 .eyebrow span { display: inline-flex; align-items: center; justify-content: center; background: #dfe9df; border-radius: 2px; width: 29px; height: 26px; font-family: 'DM Sans', sans-serif; font-size: 11px; letter-spacing: 0; }
 .eyebrow svg { margin-left: auto; color: #d9774c; }
-h1 { font-family: 'Noto Sans SC', sans-serif; font-size: clamp(40px, 3.8vw, 58px); line-height: 1.23; margin: 29px 0 18px; letter-spacing: -.08em; font-weight: 700; color: #263f37; }
+h1 { font-family: 'Newsreader', Georgia, serif; font-size: clamp(49px, 4.2vw, 64px); line-height: 1.03; margin: 29px 0 18px; letter-spacing: -.055em; font-weight: 500; color: #263f37; }
 h1 em { font-style: normal; color: #dd7045; }
 .intro-copy { color: #69766e; line-height: 1.8; font-size: 13px; margin: 0 0 36px; max-width: 285px; }
 .search-box label { display: block; margin-bottom: 10px; font-size: 11px; font-weight: 700; color: #344b42; }
@@ -117,7 +117,7 @@ h1 em { font-style: normal; color: #dd7045; }
 .status-divider { height: 15px; width: 1px; background: #d5ded3; }
 .map-north { right: 34px; top: 82px; display: flex; flex-direction: column; align-items: center; font-size: 10px; font-weight: 700; color: #567666; letter-spacing: .1em; }
 .map-north span { font-size: 20px; line-height: 1.1; }
-.leaflet-container { font-family: 'DM Sans', 'Noto Sans SC', sans-serif; background: #e8ece7; }
+.leaflet-container { font-family: 'DM Sans', sans-serif; background: #e8ece7; }
 .leaflet-control-zoom { border: 1px solid #cbdaca !important; border-radius: 0 !important; box-shadow: 0 4px 16px rgba(43,65,49,.11) !important; margin-right: 22px !important; margin-bottom: 20px !important; }
 .leaflet-control-zoom a { border-radius: 0 !important; background: #fffefa !important; color: #315a49 !important; border-color: #dce5d9 !important; }
 .leaflet-control-attribution { font-size: 8px !important; background: rgba(255,255,255,.72) !important; }

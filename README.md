@@ -1,43 +1,45 @@
-# Parcel Atlas · 匹兹堡地块探索
+# Parcel Atlas · Pittsburgh Site Explorer
 
-Track 1 的第一步原型：在匹兹堡地图上查看县级地块边界和市级规划分区，点击或搜索地块后查看地块编号、面积及所选位置的分区。
+An early Track 1 prototype for the AI for Housing Hackathon. Explore Allegheny County parcel boundaries and City of Pittsburgh zoning on one interactive map. Select or search for a parcel to see its ID, recorded area, and the zoning district at the selected point.
 
-## 运行
+## Run locally
 
-需要 Node.js 20.19+ 或 22.12+。
+Requires Node.js 20.19+ or 22.12+.
 
 ```bash
 npm install
 npm run dev
 ```
 
-打开 Vite 显示的本地地址（默认 `http://localhost:5173`）。构建和运行生产版本：
+Open the Vite URL shown in the terminal (usually `http://localhost:5173`). For a production build:
 
 ```bash
 npm run build
 npm start
 ```
 
-生产版默认监听 `http://localhost:8787`，可用 `PORT` 环境变量修改。地图需要网络连接，以加载底图和官方 GIS 服务。
+The production server defaults to `http://localhost:8787`; set `PORT` to use another port. The map needs an internet connection for tiles and public GIS services.
 
-## 数据来源与处理
+## Data sources
 
-- [阿勒格尼县地块边界](https://data.wprdc.org/dataset/allegheny-county-parcel-boundaries1)：页面提供的县级完整 GeoJSON 约 444 MB。应用改为按当前地图范围请求[县 GIS 地块接口](https://gisdata.alleghenycounty.us/arcgis/rest/services/OPENDATA/Parcels/MapServer/0)，只显示缩放级别 16 及以上的地块。
-- [匹兹堡规划分区](https://data.wprdc.org/dataset/zoning)：按当前视野请求[市 GIS 分区接口](https://services1.arcgis.com/YZCmUqbcsUpOKfj7/arcgis/rest/services/PGHWebZoning/FeatureServer/0)。分区只覆盖匹兹堡市内。
-- 底图：[OpenStreetMap 标准瓦片](https://operations.osmfoundation.org/policies/tiles/)，通过 Leaflet 按当前视野加载。公开演示不需要 API key；正式大流量部署应遵守瓦片使用政策或选择有容量保障的服务。
+- [Allegheny County Parcel Boundaries](https://data.wprdc.org/dataset/allegheny-county-parcel-boundaries1): the full GeoJSON is approximately 444 MB. This app queries the [county GIS parcel service](https://gisdata.alleghenycounty.us/arcgis/rest/services/OPENDATA/Parcels/MapServer/0) for the current map view instead of downloading the entire county. Parcel outlines appear at zoom 16 and above.
+- [Pittsburgh Zoning Districts](https://data.wprdc.org/dataset/zoning): the app queries the [city GIS zoning service](https://services1.arcgis.com/YZCmUqbcsUpOKfj7/arcgis/rest/services/PGHWebZoning/FeatureServer/0) for visible districts. This layer covers the City of Pittsburgh.
+- [OpenStreetMap standard tiles](https://operations.osmfoundation.org/policies/tiles/): the Leaflet basemap loads only tiles needed for the current viewport. No API key is required for normal interactive use. Follow the tile usage policy or use a service with suitable capacity for high-traffic deployment.
 
-县地块数据页给出的 PASDA 实时地图接口在开发时返回“service not started”，因此此原型使用县政府自身提供的 GIS 接口。没有把完整数据文件放入仓库。
+The parcel dataset page's PASDA map service returned “service not started” during development, so this prototype uses the county's own GIS service. Full source datasets are not checked into the repository.
 
-分区结果是**点击位置**的空间查询，不是正式的整块地法规划分区结论。地块可能跨越多个分区，且用途、叠加区和例外需查阅现行法规并由主管部门确认。此阶段不生成 Development Ease Score，也不提供许可结论。
+## Current interactions
 
-## 已实现的交互
+- City overview and downtown example buttons
+- Parcel and zoning layer toggles
+- Viewport-based parcel loading; click a parcel for its ID, area, and point-based zoning lookup
+- Search by full PIN or county block/lot ID
+- Loading and error states, plus a responsive layout
 
-- 城市总览及市中心示例定位
-- 地块边界、分区图层开关
-- 放大后按视野加载地块；点击查看地块编号、面积和位置分区
-- 按完整 PIN 或 Block / Lot 编号搜索地块
-- 加载和错误提示、窄屏布局
+## Interpretation and limitations
 
-## AI 使用说明
+The displayed zoning district comes from a **point lookup** at the clicked location (or the selected parcel's map bounds center after search). A parcel may cross multiple zoning districts. The map alone does not establish permitted uses, overlay rules, exceptions, or permit eligibility. Verify important findings against the current [Pittsburgh Zoning Code](https://www.pittsburghpa.gov/Business-Development/City-Planning/Zoning) and the responsible city office. This stage does not generate a Development Ease Score or make a permit determination.
 
-此阶段的界面和代码由 OpenAI Codex 辅助编写。地图数据直接来自上述公开 GIS 接口；没有使用 AI 生成或修改地块、分区事实。
+## AI use disclosure
+
+OpenAI Codex assisted with the interface and code in this prototype. Parcel and zoning facts are retrieved from the cited public GIS services; AI did not generate or alter those records.

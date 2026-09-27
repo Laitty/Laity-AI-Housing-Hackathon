@@ -38,10 +38,10 @@ async function queryArcGIS(service, params, limit = 5000) {
       headers: { accept: 'application/geo+json, application/json' },
       signal: AbortSignal.timeout(18000),
     });
-    if (!response.ok) throw new Error(`上游地图服务返回 ${response.status}`);
+    if (!response.ok) throw new Error(`The map data service returned ${response.status}`);
     const data = await response.json();
-    if (data.error) throw new Error(data.error.message || '地图服务暂时不可用');
-    if (!Array.isArray(data.features)) throw new Error('地图服务返回了无法识别的数据');
+    if (data.error) throw new Error(data.error.message || 'The map data service is unavailable');
+    if (!Array.isArray(data.features)) throw new Error('The map data service returned an unexpected response');
     features.push(...data.features);
     if (data.features.length < pageSize) break;
     if (offset + pageSize >= limit) truncated = true;
@@ -52,14 +52,14 @@ async function queryArcGIS(service, params, limit = 5000) {
 
 function handleError(response, error) {
   console.error(error);
-  response.status(502).json({ error: error.message || '地图服务暂时不可用' });
+  response.status(502).json({ error: error.message || 'The map data service is unavailable' });
 }
 
 app.get('/api/health', (_request, response) => response.json({ ok: true }));
 
 app.get('/api/parcels', async (request, response) => {
   const bbox = parseBBox(request.query.bbox);
-  if (!bbox) return response.status(400).json({ error: '地图范围无效' });
+  if (!bbox) return response.status(400).json({ error: 'Invalid map bounds' });
   try {
     const data = await queryArcGIS(parcelService, {
       geometry: bbox.join(','),
@@ -76,7 +76,7 @@ app.get('/api/parcels', async (request, response) => {
 
 app.get('/api/parcel-search', async (request, response) => {
   const query = String(request.query.q || '').trim().toUpperCase();
-  if (!/^[A-Z0-9 -]{2,24}$/.test(query)) return response.status(400).json({ error: '请输入有效的地块编号' });
+  if (!/^[A-Z0-9 -]{2,24}$/.test(query)) return response.status(400).json({ error: 'Enter a valid parcel ID' });
   try {
     const data = await queryArcGIS(parcelService, {
       where: `PIN='${query}' OR MAPBLOCKLOT='${query}'`,
@@ -90,7 +90,7 @@ app.get('/api/parcel-search', async (request, response) => {
 
 app.get('/api/zoning', async (request, response) => {
   const bbox = parseBBox(request.query.bbox);
-  if (!bbox) return response.status(400).json({ error: '地图范围无效' });
+  if (!bbox) return response.status(400).json({ error: 'Invalid map bounds' });
   try {
     const data = await queryArcGIS(zoningService, {
       geometry: bbox.join(','),
@@ -109,7 +109,7 @@ app.get('/api/zoning-at', async (request, response) => {
   const longitude = Number(request.query.lon);
   const latitude = Number(request.query.lat);
   if (!Number.isFinite(longitude) || !Number.isFinite(latitude) || longitude < -81 || longitude > -79 || latitude < 39.5 || latitude > 41) {
-    return response.status(400).json({ error: '位置无效' });
+    return response.status(400).json({ error: 'Invalid location' });
   }
   try {
     const data = await queryArcGIS(zoningService, {
