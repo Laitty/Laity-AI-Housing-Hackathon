@@ -514,8 +514,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .parcel-focus-marker { background: rgba(53, 133, 225, .2); border-color: rgba(40, 117, 209, .58); box-shadow: 0 0 0 7px rgba(53, 133, 225, .12); }
 .parcel-focus-marker span { background: #2678d3; box-shadow: 0 2px 8px rgba(24, 71, 128, .35); }
 .parcel-focus-marker::after { border-color: rgba(42, 122, 216, .78); }
-.parcel-sheet { background: rgba(255, 255, 255, .6); border-color: rgba(255, 255, 255, .88); box-shadow: 0 20px 50px rgba(23, 45, 76, .18), 0 2px 10px rgba(23, 45, 76, .06); }
-.parcel-sheet-head { border-bottom-color: rgba(43, 92, 153, .12); }
+.parcel-sheet { background: rgba(248, 251, 255, .42); border-color: rgba(255, 255, 255, .76); box-shadow: 0 20px 50px rgba(23, 45, 76, .14), 0 2px 10px rgba(23, 45, 76, .05); backdrop-filter: blur(8px) saturate(105%); -webkit-backdrop-filter: blur(8px) saturate(105%); }
+.parcel-sheet-head { border-bottom-color: rgba(43, 92, 153, .12); background: rgba(255, 255, 255, .08); }
 .parcel-sheet-head span, .compact-score-kicker { color: #547aab; }
 .parcel-sheet-head small, .compact-score-status, .compact-score-value span { color: #7087a3; }
 .parcel-sheet-head strong, .compact-score-value { color: #193d70; }
