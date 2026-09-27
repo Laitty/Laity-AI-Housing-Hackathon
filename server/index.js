@@ -11,12 +11,14 @@ const app = express();
 const port = Number(process.env.PORT) || 8787;
 const parcelService = 'https://gisdata.alleghenycounty.us/arcgis/rest/services/OPENDATA/Parcels/MapServer/0/query';
 const zoningService = 'https://services1.arcgis.com/YZCmUqbcsUpOKfj7/arcgis/rest/services/PGHWebZoning/FeatureServer/0/query';
+const cityBoundaryService = 'https://services1.arcgis.com/YZCmUqbcsUpOKfj7/ArcGIS/rest/services/City_Boundary/FeatureServer/0/query';
 const slopeService = 'https://services1.arcgis.com/YZCmUqbcsUpOKfj7/arcgis/rest/services/PGHWebSlope25/FeatureServer/0/query';
 const underminedService = 'https://services1.arcgis.com/YZCmUqbcsUpOKfj7/arcgis/rest/services/PGHWebUndermined/FeatureServer/0/query';
 const floodService = 'https://services1.arcgis.com/YZCmUqbcsUpOKfj7/ArcGIS/rest/services/FEMA_2026/FeatureServer/0/query';
 const historicService = 'https://pghbridgis.pittsburghpa.gov/federated/rest/services/Historic_Districts/MapServer/0/query';
 const assessmentResource = '65855e14-549e-4992-b5be-d629afc676fa';
 const evidenceCache = new Map();
+let cityBoundaryCache = null;
 const CACHE_MS = 5 * 60 * 1000;
 
 function parseBBox(raw) {
@@ -291,6 +293,15 @@ app.get('/api/decision-contract', (_request, response) => response.json({
   futureProvider: 'Jev adapter can replace getDecisionAdvice(context) in server/decision.js',
   outputFields: ['obstacles', 'approvalPath', 'nextActions'],
 }));
+
+app.get('/api/city-boundary', async (_request, response) => {
+  try {
+    if (!cityBoundaryCache) cityBoundaryCache = await queryArcGIS(cityBoundaryService, { outFields: 'OBJECTID' }, 10);
+    response.json(cityBoundaryCache);
+  } catch (error) {
+    handleError(response, error);
+  }
+});
 
 app.get('/api/parcels', async (request, response) => {
   const bbox = parseBBox(request.query.bbox);

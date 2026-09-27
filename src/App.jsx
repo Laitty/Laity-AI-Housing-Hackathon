@@ -18,6 +18,7 @@ import {
 const PARCEL_SOURCE = 'https://data.wprdc.org/dataset/allegheny-county-parcel-boundaries1';
 const ZONING_SOURCE = 'https://data.wprdc.org/dataset/zoning';
 const CITY_CENTER = [40.4406, -79.9959];
+const CITY_BOUNDS = [[40.3616, -80.0954], [40.5010, -79.8657]];
 const DOWNTOWN = [40.4385, -79.9972];
 const MIN_PARCEL_ZOOM = 16;
 
@@ -79,7 +80,7 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange }) {
       <strong>{score.displayRange ? scoreLabel(score) : 'Review required'}</strong>
       <span>{score.displayRange ? `/ 100 · ${score.status}` : score.status}</span>
     </div>
-    <p className="score-caption">{score.knownWeight}/100 points have data for this initial check. {score.knownWeight < 100 ? 'Unknown factors widen the range. ' : ''}This is a relative screening score, not a permit decision.</p>
+    <p className="score-caption"><b>Evidence coverage: {score.knownWeight}/100 weighted points.</b> {score.knownWeight < 100 ? 'Unknown factors widen the range. ' : ''}{!score.displayRange ? 'The headline score is withheld until the use or approval path is reviewed. ' : ''}This is a relative screening result, not a permit decision.</p>
     {scenarioOptions?.length > 0 && <section className="scenario-matrix"><h3>Same parcel · three housing options</h3><div>
       {scenarioOptions.map((option) => <button type="button" className={option.scenario.id === evaluation.scenario.id ? 'active' : ''} key={option.scenario.id} onClick={() => onScenarioChange(option.scenario.id)}>
         <span>{option.scenario.title}</span><strong>{scoreLabel(option.score)}</strong>
@@ -142,7 +143,10 @@ function ComparisonBoard({ comparison, loading, error, onOpen, onClear, scenario
 
 export default function App() {
   const mapElement = useRef(null);
+  const mapArea = useRef(null);
   const map = useRef(null);
+  const cityBoundaryLayer = useRef(null);
+  const cityBounds = useRef(L.latLngBounds(CITY_BOUNDS));
   const parcelLayer = useRef(null);
   const zoningLayer = useRef(null);
   const selectedLayer = useRef(null);
@@ -170,16 +174,38 @@ export default function App() {
   scenarioRef.current = scenario;
 
   useEffect(() => {
-    if (selected?.pin) selectedCard.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (selected?.pin) selectedCard.current?.scrollTo({ top: 0, behavior: 'auto' });
   }, [selected?.pin]);
+
+  const focusParcel = useCallback((feature) => {
+    const currentMap = map.current;
+    if (!currentMap) return;
+    const compact = window.matchMedia('(max-width: 960px)').matches;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const bounds = L.geoJSON(feature).getBounds().pad(3);
+    currentMap.flyToBounds(bounds, {
+      maxZoom: compact ? 16 : 16.5,
+      paddingTopLeft: compact ? [28, 24] : [36, 56],
+      paddingBottomRight: compact ? [28, 210] : [420, 56],
+      animate: !reducedMotion,
+      duration: 1.15,
+      easeLinearity: 0.2,
+    });
+    if (compact) mapArea.current?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
+  }, []);
 
   const selectParcel = useCallback(async (feature, requestedId) => {
     const currentMap = map.current;
     if (!currentMap || !feature) return;
+    focusParcel(feature);
     parcelZoningRequest.current?.abort();
     selectedLayer.current.clearLayers();
     L.geoJSON(feature, {
       style: { color: '#df6b3b', weight: 3, fillColor: '#e8a07d', fillOpacity: 0.22 },
+      interactive: false,
+    }).addTo(selectedLayer.current);
+    L.marker(L.geoJSON(feature).getBounds().getCenter(), {
+      icon: L.divIcon({ className: 'parcel-focus-marker', html: '<span></span>', iconSize: [28, 28], iconAnchor: [14, 14] }),
       interactive: false,
     }).addTo(selectedLayer.current);
 
@@ -200,7 +226,7 @@ export default function App() {
         setSelected((previous) => previous?.pin === pin ? { ...previous, zoningLoading: false, zoningError: error.message } : previous);
       }
     }
-  }, []);
+  }, [focusParcel]);
 
   useEffect(() => {
     if (!selected?.pin) return;
@@ -239,9 +265,10 @@ export default function App() {
   useEffect(() => {
     const instance = L.map(mapElement.current, {
       center: CITY_CENTER,
-      zoom: 12,
-      minZoom: 11,
+      zoom: 11,
+      minZoom: 9,
       maxZoom: 19,
+      zoomSnap: 0.25,
       zoomControl: false,
       preferCanvas: true,
       maxBounds: [[40.32, -80.16], [40.56, -79.78]],
@@ -253,12 +280,25 @@ export default function App() {
       attribution: '&copy; OpenStreetMap contributors',
     }).addTo(instance);
     L.control.zoom({ position: 'bottomright' }).addTo(instance);
+    cityBoundaryLayer.current = L.layerGroup().addTo(instance);
     zoningLayer.current = L.layerGroup().addTo(instance);
     parcelLayer.current = L.layerGroup().addTo(instance);
     selectedLayer.current = L.layerGroup().addTo(instance);
     map.current = instance;
+    instance.fitBounds(cityBounds.current, { padding: [30, 30], animate: false });
+
+    const boundaryController = new AbortController();
+    getJSON('/api/city-boundary', boundaryController.signal).then((data) => {
+      if (boundaryController.signal.aborted) return;
+      const outline = L.geoJSON(data, {
+        style: { color: '#2c6b61', weight: 2.2, opacity: 0.82, fillOpacity: 0, dashArray: '7 6' },
+        interactive: false,
+      }).addTo(cityBoundaryLayer.current);
+      if (outline.getBounds().isValid()) cityBounds.current = outline.getBounds();
+    }).catch(() => { /* The overview still uses the published city extent. */ });
 
     return () => {
+      boundaryController.abort();
       parcelRequest.current?.abort();
       zoningRequest.current?.abort();
       parcelZoningRequest.current?.abort();
@@ -355,8 +395,6 @@ export default function App() {
         setNotice('Parcel not found. Try a full PIN or a block/lot ID such as 2-J-129.');
         return;
       }
-      const bounds = L.geoJSON(feature).getBounds();
-      map.current.fitBounds(bounds.pad(1.7), { maxZoom: 17, animate: true });
       selectParcel(feature, term);
     } catch (error) {
       setNotice(`Search failed: ${error.message}`);
@@ -392,7 +430,6 @@ export default function App() {
       const data = await getJSON(`/api/parcel-search?q=${encodeURIComponent(pin)}`);
       const feature = data.features[0];
       if (!feature) return;
-      map.current.fitBounds(L.geoJSON(feature).getBounds().pad(1.7), { maxZoom: 17, animate: true });
       selectParcel(feature, pin);
     } catch (error) {
       setNotice(`Could not open parcel: ${error.message}`);
@@ -418,6 +455,14 @@ export default function App() {
     parcelZoningRequest.current?.abort();
     selectedLayer.current?.clearLayers();
     setSelected(null);
+  }
+
+  function showCityOverview() {
+    clearSelection();
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    map.current?.flyToBounds(cityBounds.current, {
+      padding: [30, 30], animate: !reducedMotion, duration: 1.15, easeLinearity: 0.2,
+    });
   }
 
   function toggleLayer(name) {
@@ -508,53 +553,53 @@ export default function App() {
               <div className="legend"><span><i className="legend-residential" />Residential</span><span><i className="legend-mixed" />Other urban</span><span><i className="legend-special" />Special areas</span></div>
             </section>
 
-            <section className="selection-section">
-              <div className="selection-title"><span>Selected parcel</span>{selected && <button onClick={clearSelection} aria-label="Clear selected parcel"><X size={15} /></button>}</div>
-              {selected ? (
-                <div className="selected-card" ref={selectedCard}>
-                  <div className="selected-pin"><MapPin size={17} strokeWidth={1.8} /><span>{selected.properties.MAPBLOCKLOT || selected.pin}</span><Check size={16} /></div>
-                  <button className="add-comparison" type="button" onClick={addSelectedToComparison}>Add to comparison <ArrowUpRight size={14} /></button>
-                  <div className="selected-grid">
-                    <div><span>Full parcel ID</span><strong>{selected.properties.PIN || 'Unavailable'}</strong></div>
-                    <div><span>Parcel area</span><strong>{areaLabel}</strong></div>
-                  </div>
-                  <div className="zone-result">
-                    <span>Zoning across the parcel</span>
-                    {selected.zoningLoading ? <strong className="muted">Checking parcel boundaries…</strong> : selected.zoningError ? (
-                      <strong className="muted">{selected.zoningError}</strong>
-                    ) : districts.length ? (
-                      <>
-                        {districts.map((district) => (
-                          <div className="zone-district" key={`${district.code}-${district.status || 'unknown'}`}>
-                            <div className="zone-district-top"><b>{district.code}</b><strong>{district.parcelShare < 0.1 ? '<0.1' : district.parcelShare.toFixed(1)}% of parcel</strong></div>
-                            <span>{district.name || 'Zoning name unavailable'}</span>
-                            <div className="zone-share-track"><span style={{ width: `${Math.min(100, district.parcelShare)}%` }} /></div>
-                            <small>GIS status: {district.status || 'not recorded'}</small>
-                          </div>
-                        ))}
-                        {zoningReviewReasons.length > 0 && <p className="review-flag">Review needed: {zoningReviewReasons.join('; ')}.</p>}
-                      </>
-                    ) : <strong className="muted">No city zoning overlap found; this parcel may be outside Pittsburgh.</strong>}
-                  </div>
-                  {selected.evaluation?.scenario.id === scenario && <ScorePanel evaluation={selected.evaluation} scenarioOptions={selected.scenarioOptions} onScenarioChange={setScenario} />}
-                  <p className="card-footnote">County parcel and city GIS polygons are intersected for this screening. Each conclusion needs the listed source and local review.</p>
-                </div>
-              ) : (
-                <div className="empty-selection"><MousePointer2 size={22} strokeWidth={1.4} /><p>Zoom in and select a parcel<br />to see its ID and zoning</p></div>
-              )}
-            </section>
+            <div className="sidebar-guide"><MapPin size={17} /><span>{selected ? `Viewing ${selected.properties.MAPBLOCKLOT || selected.pin} on the map` : 'Search an ID or select a parcel to open its site report on the map.'}</span></div>
           </div>
 
           <div className="sidebar-footer"><span>DATA SOURCES</span><DataLink href={PARCEL_SOURCE}>County parcels</DataLink><DataLink href={ZONING_SOURCE}>City zoning</DataLink></div>
         </aside>
 
-        <section className="map-area" aria-label="Pittsburgh parcel map">
+        <section className="map-area" ref={mapArea} aria-label="Pittsburgh parcel map">
           <div ref={mapElement} className="map-canvas" />
           <div className="map-top-left"><span className="map-locator"><LocateFixed size={15} /> UNITED STATES / PENNSYLVANIA / PITTSBURGH</span></div>
-          <div className="map-top-right"><button type="button" onClick={() => map.current?.flyTo(CITY_CENTER, 12)}><Compass size={16} /> City overview</button><button type="button" onClick={() => map.current?.flyTo(DOWNTOWN, 17)}><Focus size={16} /> Downtown example</button></div>
-          {layers.parcels && zoom < MIN_PARCEL_ZOOM && <div className="zoom-hint"><span className="hint-icon"><MousePointer2 size={17} /></span><span><strong>Zoom to block level</strong><small>to view and select individual parcels</small></span><ChevronRight size={16} /></div>}
+          <div className="map-top-right"><button type="button" onClick={showCityOverview}><Compass size={16} /> City overview</button><button type="button" onClick={() => { clearSelection(); map.current?.flyTo(DOWNTOWN, 16, { duration: 1 }); }}><Focus size={16} /> Downtown example</button></div>
+          {layers.parcels && zoom < MIN_PARCEL_ZOOM && !selected && <div className="zoom-hint"><span className="hint-icon"><MousePointer2 size={17} /></span><span><strong>Explore Pittsburgh</strong><small>Search a parcel ID or zoom in to select a site</small></span><ChevronRight size={16} /></div>}
           <div className="map-bottom-left"><span className="status-pulse" /><span>{loading.parcels || loading.zoning ? 'Loading map data' : zoom >= MIN_PARCEL_ZOOM && layers.parcels ? `${parcelCount.toLocaleString()} parcels · ${zoningCount} zoning areas` : `${zoningCount} zoning areas · zoom in for parcels`}</span><span className="status-divider" /> <span>ZOOM {zoom}</span></div>
           <div className="map-north">N <span>↑</span></div>
+          {selected && <aside className="parcel-sheet" key={selected.pin} aria-label={`Site report for ${selected.properties.MAPBLOCKLOT || selected.pin}`}>
+            <div className="parcel-sheet-head"><div><span>SITE REPORT</span><strong>{selected.properties.MAPBLOCKLOT || selected.pin}</strong></div><button type="button" onClick={clearSelection} aria-label="Close site report"><X size={18} /></button></div>
+            <div className="parcel-sheet-body" ref={selectedCard}>
+              <div className="selected-card">
+                <div className="selected-pin"><MapPin size={17} strokeWidth={1.8} /><span>County parcel · {selected.properties.MAPBLOCKLOT || selected.pin}</span><Check size={16} /></div>
+                <button className="add-comparison" type="button" onClick={addSelectedToComparison}>Add to comparison <ArrowUpRight size={14} /></button>
+                {selected.zoningLoading && !selected.evaluation && <div className="report-loading" role="status"><span className="tiny-spinner" /> Checking zoning, site conditions, and source records…</div>}
+                {selected.evaluation?.scenario.id === scenario && <ScorePanel evaluation={selected.evaluation} scenarioOptions={selected.scenarioOptions} onScenarioChange={setScenario} />}
+                <div className="selected-grid">
+                  <div><span>Full parcel ID</span><strong>{selected.properties.PIN || 'Unavailable'}</strong></div>
+                  <div><span>Parcel area</span><strong>{areaLabel}</strong></div>
+                </div>
+                <div className="zone-result">
+                  <span>Zoning across the parcel</span>
+                  {selected.zoningLoading ? <strong className="muted">Checking parcel boundaries…</strong> : selected.zoningError ? (
+                    <strong className="muted">{selected.zoningError}</strong>
+                  ) : districts.length ? (
+                    <>
+                      {districts.map((district) => (
+                        <div className="zone-district" key={`${district.code}-${district.status || 'unknown'}`}>
+                          <div className="zone-district-top"><b>{district.code}</b><strong>{district.parcelShare < 0.1 ? '<0.1' : district.parcelShare.toFixed(1)}% of parcel</strong></div>
+                          <span>{district.name || 'Zoning name unavailable'}</span>
+                          <div className="zone-share-track"><span style={{ width: `${Math.min(100, district.parcelShare)}%` }} /></div>
+                          <small>GIS status: {district.status || 'not recorded'}</small>
+                        </div>
+                      ))}
+                      {zoningReviewReasons.length > 0 && <p className="review-flag">Review needed: {zoningReviewReasons.join('; ')}.</p>}
+                    </>
+                  ) : <strong className="muted">No city zoning overlap found; this parcel may be outside Pittsburgh.</strong>}
+                </div>
+                <p className="card-footnote">County parcel and city GIS polygons are intersected for this screening. Each conclusion needs the listed source and local review.</p>
+              </div>
+            </div>
+          </aside>}
         </section>
         {comparisonIds.length > 0 && <ComparisonBoard comparison={comparison} loading={comparisonLoading} error={comparisonError} onOpen={openComparisonParcel} onClear={clearComparison} scenario={scenario} policy={policy} />}
       </main>

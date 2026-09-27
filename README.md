@@ -15,7 +15,7 @@ npm start
 Open `http://localhost:8787`. For development, use `npm run dev` and open the Vite URL. No API key is required for the public GIS/WPRDC sources or ordinary OpenStreetMap tile use. Follow the [OSM tile policy](https://operations.osmfoundation.org/policies/tiles/) for high-traffic deployment.
 
 1. Choose **Starter home** (one detached unit), **Two-unit home** (two units in one building), or **Small multi-unit** (four units in one building). “Starter” is a product label; the underlying legal use is Single-Unit Detached Residential. Four units are used because the code's Multi-Unit Residential category begins at four.
-2. Search a parcel ID such as `85-N-171`, or click a parcel on the map at zoom 16+. The selected parcel panel shows all three scenario outcomes for the same parcel; click an option for detailed scoring.
+2. The map opens at the full Pittsburgh city extent with the [City of Pittsburgh boundary layer](https://services1.arcgis.com/YZCmUqbcsUpOKfj7/ArcGIS/rest/services/City_Boundary/FeatureServer/0). Search a parcel ID such as `85-N-171`, or click a parcel on the map at zoom 16+. The map smoothly focuses on its surrounding blocks and opens a translucent, scrollable site report over the map. **City overview** restores the city view. The report shows all three scenario outcomes; click an option for detailed scoring. Motion respects the user's reduced-motion setting.
 3. Enter 1–5 IDs separated by commas or whitespace, such as `85-N-171, 85-N-163, 2-N-297`, then click **Compare parcels**. Cards appear side by side for the **same** chosen building type, with baseline score or “Review”, leading source findings, unresolved items, and first action.
 4. Open the **Obstacle & evidence checklist**, **Possible approval path**, and **Next actions** in the selected parcel panel. `Confirmed in source` means the cited map or record contains that signal. It does not establish on-site conditions or a final legal determination. `Needs verification` identifies missing or project-specific facts.
 5. Try the policy/resource switches. They simulate allowing the selected use in residential base districts, reducing the published minimum lot area by 20%, and assuming utility capacity. The comparison board retains baseline results and shows the hypothetical result separately. Utility capacity is **not** assigned score points.
@@ -64,6 +64,7 @@ The [2026-09-27 raw-data backtest](analysis/backtest-2026-09-27.md) checked 16 d
 ## API and Jev adapter point
 
 - `GET /api/parcel-search?q=85-N-171` — exact source record and ID evidence.
+- `GET /api/city-boundary` — cached official city outline for the opening map view.
 - `GET /api/site-evaluation?pin=85-N-171&scenario=duplex` — one parcel, one scenario, score, source evidence, obstacles, approval path, and actions.
 - `GET /api/scenario-options?pin=85-N-171` — all three scenario score summaries for one parcel.
 - `POST /api/compare` — body `{"ids":["85-N-171","85-N-163"],"scenario":"duplex","policy":{"allowResidentialUse":true,"reduceMinimumLot":false,"assumeUtilityCapacity":false}}`.
