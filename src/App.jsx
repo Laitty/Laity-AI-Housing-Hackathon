@@ -25,8 +25,7 @@ const CITY_MASK_EXTENT = [[40.2, -80.3], [40.2, -79.6], [40.7, -79.6], [40.7, -8
 const DOWNTOWN = [40.4385, -79.9972];
 const MIN_ZONING_ZOOM = 13;
 const MIN_PARCEL_ZOOM = 16;
-const MAX_NEIGHBORHOOD_ZOOM = 17.25;
-const PARCEL_CONTEXT_RADIUS_METERS = 260;
+const PARCEL_FOCUS_MAX_ZOOM = 18.75;
 
 function zoningColor(properties = {}) {
   const category = String(properties.legendtype || '').trim().toLowerCase();
@@ -83,18 +82,6 @@ function groupResult(score, group) {
   const known = entries.reduce((total, entry) => total + (entry.earned ?? 0), 0);
   const unknown = entries.reduce((total, entry) => total + (entry.earned === null ? entry.weight : 0), 0);
   return { entries, known, unknown, weight: GROUP_WEIGHTS[group] };
-}
-
-function parcelContextBounds(feature) {
-  const parcelBounds = L.geoJSON(feature).getBounds();
-  const center = parcelBounds.getCenter();
-  const latitudeRadius = PARCEL_CONTEXT_RADIUS_METERS / 111320;
-  const longitudeRadius = latitudeRadius / Math.cos(center.lat * Math.PI / 180);
-  const neighborhoodBounds = L.latLngBounds(
-    [center.lat - latitudeRadius, center.lng - longitudeRadius],
-    [center.lat + latitudeRadius, center.lng + longitudeRadius],
-  );
-  return parcelBounds.pad(0.85).extend(neighborhoodBounds);
 }
 
 function cityMaskRings(collection) {
@@ -282,10 +269,10 @@ export default function App() {
     if (!currentMap) return;
     const compact = window.matchMedia('(max-width: 960px)').matches;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const bounds = parcelContextBounds(feature);
+    const bounds = L.geoJSON(feature).getBounds().pad(1.5);
     cityMaskLayer.current?.clearLayers();
     currentMap.flyToBounds(bounds, {
-      maxZoom: compact ? 16.5 : MAX_NEIGHBORHOOD_ZOOM,
+      maxZoom: PARCEL_FOCUS_MAX_ZOOM,
       paddingTopLeft: compact ? [28, 24] : [36, 56],
       paddingBottomRight: compact ? [28, comparisonExpandedRef.current ? 320 : 210] : [420, comparisonExpandedRef.current ? 320 : 56],
       animate: !reducedMotion,
@@ -364,7 +351,7 @@ export default function App() {
       center: CITY_CENTER,
       zoom: 11,
       minZoom: 9,
-      maxZoom: MAX_NEIGHBORHOOD_ZOOM,
+      maxZoom: 19,
       zoomSnap: 0.25,
       zoomControl: false,
       preferCanvas: true,
@@ -373,7 +360,7 @@ export default function App() {
     });
 
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: MAX_NEIGHBORHOOD_ZOOM,
+      maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors',
     }).addTo(instance);
     L.control.zoom({ position: 'bottomright' }).addTo(instance);
