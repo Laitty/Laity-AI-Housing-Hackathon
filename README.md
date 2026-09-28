@@ -4,6 +4,8 @@
 
 Parcel Atlas brings Pittsburgh's parcel records, zoning rules, and mapped site conditions into one place. Search for a property, explore what different housing projects might involve, and see which questions need answers before moving forward. It is an early site-screening tool, not a permit decision.
 
+This demonstration is Pittsburgh. Time and compute limit the complete published result to ZIP 15213, not the whole city. That result scores the matched parcels in 15213 for all four housing types and is stored in [analysis/ease-15213.jsonl](analysis/ease-15213.jsonl). The methodology is public in this repository, including [analysis/ease-score-system.md](analysis/ease-score-system.md) and [analysis/ease-score-backtest.md](analysis/ease-score-backtest.md). With enough compute, the same method can be extended iteratively beyond 15213. A live search can still evaluate one Pittsburgh parcel from public records; the finished area-wide set is 15213.
+
 ## Explore a site
 
 Start with a county parcel ID such as `52-N-176` or `0052N00176000000`, or zoom in and click a parcel on the map. The opening view outlines Pittsburgh while keeping the surrounding map visible for context. Parcel boundaries appear as you zoom closer; **City overview** and **Downtown example** provide quick ways to navigate. Search accepts a block-lot or a 16-character PIN, and can include the housing type in the same box: `52-N-176 1 unit`, `52-N-176 2 homes`, `52-N-176 double`, or `52-N-176 four`. The parcel opens on the map, and the housing button follows that phrase. A number that is part of the parcel ID, such as the `2` in `2-N-297`, is not read as a housing type.
