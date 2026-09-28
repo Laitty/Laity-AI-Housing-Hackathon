@@ -96,7 +96,7 @@ Filling the building shortfall lowers the win rate the most, because the issued 
 
 ## Backtest
 
-The backtest has two layers so that “is this vacant land?” does not pull the weights.
+The adopted writeup is [ease-score-backtest.md](ease-score-backtest.md). The backtest has two layers so that “is this vacant land?” does not pull the weights.
 
 1. The reference layer is for starter homes only. A positive is an issued new starter permit after 9 December 2019 that can be scored. Controls are scoreable random parcels in the same ward. The frozen 0.911 score (three-level building status plus road centerline) is calculated alongside it. 0.911 is a reference, not a target to match.
 2. The choice-set layer is for tuning. Controls are further limited to the same ward and the same 2019 building-status tier. That layer looks only at area, the published lot minimum, and slope. Weights are chosen on 2020–2023 and checked on 2024–2026. A candidate is not adopted unless the later period is at least as high as the current weights.

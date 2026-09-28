@@ -45,7 +45,9 @@ The **Development Ease Score** is a 0–100 screening measure for one parcel and
 
 Unknown information stays visible as a range rather than being treated as a clean result. The report presents a **rules range** based on the scoring criteria, a **screened range** that can narrow some unknowns using nearby records, and a single point estimate within that screened range. Water and sewer capacity remains unknown in the rules range until there is parcel-level evidence. For a four-unit project, the use-path item also reflects the need for Site Plan Review.
 
-Scores are useful for comparing early options, but they are not approval probabilities. The detailed scoring rules and checks are in [analysis/ease-score-system.md](analysis/ease-score-system.md); the weight review is in [analysis/backtest-2026-09-27.md](analysis/backtest-2026-09-27.md).
+The rules range is the ranking standard. Its weights were kept after the adopted same-ward backtest in [analysis/ease-score-backtest.md](analysis/ease-score-backtest.md): issued new starter permits after 9 December 2019, compared with scoreable parcels in the same ward, ranked by the midpoint of the rules range. The adopted weights are space for the building 15, published lot minimum 12, slope 6, and existing building 10. On that reference layer the win rate is 0.882 across 27 positives. A frozen score that also used road-centerline distance reached 0.911; that figure is only a reference. Road centerline stays out of the live score, and the building weight was not raised to close the gap. An alternative that cut the lot item to 8 and raised slope to 10 looked stronger on 2020–2023, then fell to 0.742 on 2024–2026, below the adopted weights’ 0.763, so those weights stayed. This is a screening tendency, not an approval rate.
+
+Scores are useful for comparing early options, but they are not approval probabilities. The detailed scoring rules and checks are in [analysis/ease-score-system.md](analysis/ease-score-system.md). An earlier two-unit record check, which did not set these weights, is in [analysis/backtest-2026-09-27.md](analysis/backtest-2026-09-27.md).
 
 ## Data and sources
 
