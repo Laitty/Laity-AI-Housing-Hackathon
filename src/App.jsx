@@ -17,9 +17,8 @@ import {
 
 const CITY_CENTER = [40.4406, -79.9959];
 const CITY_BOUNDS = [[40.3616, -80.0954], [40.5010, -79.8657]];
-const CITY_MASK_EXTENT = [[40.2, -80.3], [40.2, -79.6], [40.7, -79.6], [40.7, -80.3], [40.2, -80.3]];
+const CITY_OVERVIEW_CONTEXT = 0.1;
 const DOWNTOWN = [40.4385, -79.9972];
-const MIN_ZONING_ZOOM = 13;
 const MIN_PARCEL_ZOOM = 16;
 const PARCEL_FOCUS_MAX_ZOOM = 18.75;
 
@@ -94,19 +93,6 @@ function groupResult(score, group) {
   const unknown = entries.reduce((total, entry) => total + (entry.earned === null ? entry.weight : 0), 0);
   const weight = entries.reduce((total, entry) => total + entry.weight, 0);
   return { entries, known, unknown, weight };
-}
-
-function cityMaskRings(collection) {
-  const rings = [CITY_MASK_EXTENT];
-  for (const feature of collection.features || []) {
-    const geometry = feature.geometry;
-    if (!geometry || !['Polygon', 'MultiPolygon'].includes(geometry.type)) continue;
-    const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
-    for (const polygon of polygons) for (const ring of polygon) {
-      rings.push(ring.map(([longitude, latitude]) => [latitude, longitude]));
-    }
-  }
-  return rings;
 }
 
 function ScoreGroup({ score, group }) {
@@ -492,8 +478,6 @@ export default function App() {
   const mapArea = useRef(null);
   const map = useRef(null);
   const cityBoundaryLayer = useRef(null);
-  const cityMaskLayer = useRef(null);
-  const cityMaskShape = useRef(null);
   const cityBounds = useRef(L.latLngBounds(CITY_BOUNDS));
   const parcelLayer = useRef(null);
   const selectedLayer = useRef(null);
@@ -501,7 +485,6 @@ export default function App() {
   const parcelRequest = useRef(null);
   const parcelZoningRequest = useRef(null);
   const scenarioRef = useRef('duplex');
-  const selectedRef = useRef(null);
   const comparisonExpandedRef = useRef(false);
   const sidebarReport = useRef(null);
   const sidebarDrag = useRef(null);
@@ -525,7 +508,6 @@ export default function App() {
   const [loading, setLoading] = useState({ parcels: false, search: false });
   const [notice, setNotice] = useState('');
   scenarioRef.current = scenario;
-  selectedRef.current = selected?.pin || null;
   comparisonExpandedRef.current = comparisonExpanded;
 
   const clampSidebarWidth = useCallback((width) => {
@@ -573,7 +555,6 @@ export default function App() {
     const compact = window.matchMedia('(max-width: 960px)').matches;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const bounds = L.geoJSON(feature).getBounds().pad(1.5);
-    cityMaskLayer.current?.clearLayers();
     currentMap.flyToBounds(bounds, {
       maxZoom: PARCEL_FOCUS_MAX_ZOOM,
       paddingTopLeft: compact ? [28, 24] : [36, 56],
@@ -588,7 +569,6 @@ export default function App() {
   const selectParcel = useCallback(async (feature, requestedId) => {
     const currentMap = map.current;
     if (!currentMap || !feature) return;
-    selectedRef.current = feature.properties?.PIN || feature.properties?.MAPBLOCKLOT || true;
     const parcelBounds = L.geoJSON(feature).getBounds();
     focusParcel(feature);
     parcelZoningRequest.current?.abort();
@@ -693,31 +673,22 @@ export default function App() {
       attribution: '&copy; OpenStreetMap contributors',
     }).addTo(instance);
     L.control.zoom({ position: 'bottomright' }).addTo(instance);
-    instance.createPane('cityMask');
-    instance.getPane('cityMask').style.zIndex = '350';
-    instance.getPane('cityMask').style.pointerEvents = 'none';
-    cityMaskLayer.current = L.layerGroup().addTo(instance);
     cityBoundaryLayer.current = L.layerGroup().addTo(instance);
     parcelLayer.current = L.layerGroup().addTo(instance);
     selectedLayer.current = L.layerGroup().addTo(instance);
     map.current = instance;
-    instance.fitBounds(cityBounds.current, { padding: [30, 30], animate: false });
+    instance.fitBounds(cityBounds.current.pad(CITY_OVERVIEW_CONTEXT), { padding: [30, 30], animate: false });
 
     const boundaryController = new AbortController();
     getJSON('/api/city-boundary', boundaryController.signal).then((data) => {
       if (boundaryController.signal.aborted) return;
-      const rings = cityMaskRings(data);
-      if (rings.length < 2) throw new Error('No usable city boundary polygons were returned');
-      cityMaskShape.current = L.polygon(rings, {
-        pane: 'cityMask', stroke: false, fillColor: '#f4f7fb', fillOpacity: 1,
-        fillRule: 'evenodd', interactive: false,
-      });
-      if (instance.getZoom() < MIN_ZONING_ZOOM && !selectedRef.current) cityMaskShape.current.addTo(cityMaskLayer.current);
       const outline = L.geoJSON(data, {
-        style: { color: '#4b6482', weight: 2.5, opacity: 0.9, fillOpacity: 0 },
+        style: { color: '#276bb8', weight: 3.5, opacity: 0.96, fillOpacity: 0, lineJoin: 'round' },
         interactive: false,
-      }).addTo(cityBoundaryLayer.current);
-      if (outline.getBounds().isValid()) cityBounds.current = outline.getBounds();
+      });
+      if (!outline.getBounds().isValid()) throw new Error('No usable city boundary polygons were returned');
+      outline.addTo(cityBoundaryLayer.current);
+      cityBounds.current = outline.getBounds();
       setBoundaryStatus('ready');
     }).catch((error) => {
       if (boundaryController.signal.aborted) return;
@@ -749,11 +720,6 @@ export default function App() {
     const currentZoom = currentMap.getZoom();
     const bbox = getBBox(currentMap);
     setZoom(currentZoom);
-    if (cityMaskShape.current) {
-      const shouldMask = currentZoom < MIN_ZONING_ZOOM && !selectedRef.current;
-      if (shouldMask && !cityMaskLayer.current.hasLayer(cityMaskShape.current)) cityMaskLayer.current.addLayer(cityMaskShape.current);
-      else if (!shouldMask && cityMaskLayer.current.hasLayer(cityMaskShape.current)) cityMaskLayer.current.removeLayer(cityMaskShape.current);
-    }
     parcelRequest.current?.abort();
     if (currentZoom < MIN_PARCEL_ZOOM) {
       parcelLayer.current.clearLayers();
@@ -871,7 +837,6 @@ export default function App() {
   function clearSelection() {
     parcelZoningRequest.current?.abort();
     selectedLayer.current?.clearLayers();
-    selectedRef.current = null;
     setDetailsOpen(false);
     setSelected(null);
   }
@@ -886,7 +851,7 @@ export default function App() {
   function showCityOverview() {
     clearSelection();
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    map.current?.flyToBounds(cityBounds.current, {
+    map.current?.flyToBounds(cityBounds.current.pad(CITY_OVERVIEW_CONTEXT), {
       padding: [30, 30], animate: !reducedMotion, duration: 1.15, easeLinearity: 0.2,
     });
   }
@@ -974,9 +939,8 @@ export default function App() {
 
         <div className="sidebar-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={320} aria-valuemax={Math.round(Math.max(320, Math.min(720, (workspaceRef.current?.clientWidth || window.innerWidth) * .55)))} aria-valuenow={sidebarWidth} aria-valuetext={`${sidebarWidth} pixels`} title="Drag to resize sidebar" tabIndex={0} onPointerDown={startSidebarResize} onPointerMove={moveSidebarResize} onPointerUp={stopSidebarResize} onPointerCancel={stopSidebarResize} onKeyDown={onSidebarResizeKeyDown}><span aria-hidden="true" /></div>
 
-        <section className={`map-area ${selected ? 'has-selection' : ''} ${comparisonExpanded ? 'comparison-expanded' : ''} ${boundaryStatus === 'loading' && zoom < MIN_ZONING_ZOOM ? 'city-boundary-loading' : ''}`} ref={mapArea} aria-label="Pittsburgh parcel map">
+        <section className={`map-area ${selected ? 'has-selection' : ''} ${comparisonExpanded ? 'comparison-expanded' : ''}`} ref={mapArea} aria-label="Pittsburgh parcel map">
           <div ref={mapElement} className="map-canvas" />
-          {boundaryStatus === 'loading' && zoom < MIN_ZONING_ZOOM && <div className="city-map-loading" role="status"><span className="tiny-spinner" /> Loading Pittsburgh city boundary…</div>}
           <div className="map-top-left"><span className="map-locator"><LocateFixed size={15} /> UNITED STATES / PENNSYLVANIA / PITTSBURGH</span></div>
           <div className="map-top-right"><button type="button" onClick={showCityOverview}><Compass size={16} /> City overview</button><button type="button" onClick={() => { clearSelection(); map.current?.flyTo(DOWNTOWN, 16, { duration: 1 }); }}><Focus size={16} /> Downtown example</button></div>
           {boundaryStatus !== 'loading' && zoom < MIN_PARCEL_ZOOM && !selected && <div className="zoom-hint"><span className="hint-icon"><MousePointer2 size={17} /></span><span><strong>Explore Pittsburgh</strong><small>Search a parcel ID or zoom in to select a site</small></span><ChevronRight size={16} /></div>}
