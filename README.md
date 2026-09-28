@@ -24,7 +24,15 @@ Open [http://localhost:8787](http://localhost:8787). The page opens on **1 home*
 4. **Compare.** Enter up to five IDs, for example `52-N-176, 52-K-240, 52-E-192`. Each card shows the three score layers. The guide underneath is the rules reading. Comparison does not call Cursor.
 5. **Ask.** The button at the bottom right can look a parcel up or ask what to verify first. Mapped facts appear first.
 
-Jev and Cursor keys are not in this repository. Publishing those keys would expose them, and GitHub secret scanning can revoke a published key, which would leave a judge unable to run those calls. After cloning, a judge can run the map, search, rules range, screened range, local integer, the rules reading in a comparison, and the local facts in Ask. Seeing Jev’s percentages, or a Cursor rewrite of an answer, requires the judge’s own keys in a local `.env` file copied from `.env.example`. Without those keys, comparison still shows the rules guide with an empty Jev choice list, and Ask keeps the mapped facts.
+Jev and Cursor keys are not in this repository. Publishing those keys would expose them, and GitHub secret scanning can revoke a published key, which would leave a judge unable to run those calls. After cloning, a judge can run the map, search, rules range, screened range, local integer, the rules reading in a comparison, and the local facts in Ask. Without those keys, comparison still shows the rules guide with an empty Jev choice list, and Ask keeps the mapped facts.
+
+A judge does not need write access to this repository to add keys. The keys stay on that judge’s own computer. From the cloned folder:
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and paste that judge’s own values after `JEV_API_KEY=` and `CURSOR_API_KEY=`. Save the file, stop the server, and run `npm start` again. Git ignores `.env`, so the keys are not pushed back to GitHub. Seeing Jev’s percentages, or a Cursor rewrite of an answer, requires those own keys. A judge who cannot obtain a Jev or Cursor key leaves those two calls off; the rest of the page still runs.
 
 ## Explore a site
 
