@@ -6,6 +6,26 @@ Parcel Atlas brings Pittsburgh's parcel records, zoning rules, and mapped site c
 
 This demonstration is Pittsburgh. Time and compute limit the complete published result to ZIP 15213, not the whole city. That result scores the matched parcels in 15213 for all four housing types and is stored in [analysis/ease-15213.jsonl](analysis/ease-15213.jsonl). The methodology is public in this repository, including [analysis/ease-score-system.md](analysis/ease-score-system.md) and [analysis/ease-score-backtest.md](analysis/ease-score-backtest.md). With enough compute, the same method can be extended iteratively beyond 15213. A live search can still evaluate one Pittsburgh parcel from public records; the finished area-wide set is 15213.
 
+## How to use
+
+Use Node.js 20.19+ or 22.12+, with an internet connection for the public map data. From the repository folder:
+
+```bash
+npm install
+npm run build
+npm start
+```
+
+Open [http://localhost:8787](http://localhost:8787). The page opens on **1 home**. For development, `npm run dev` prints a Vite URL instead. `npm test` runs the server checks.
+
+1. **Search.** Enter `52-N-176` or `0052N00176000000`. A housing phrase can go in the same box, such as `52-N-176 1 unit`, `52-N-176 2 homes`, `52-N-176 double`, or `52-N-176 four`. You can also zoom in and click a parcel. **City overview** returns to the city view.
+2. **Read the score.** The card shows an AI estimate, a screened range, and a rules range. Open the full report for the largest known gap, the first action, and the source links.
+3. **Planning tools.** After a parcel is selected, the three switches are clickable. One that does not move this parcel shows `+0` and a reason. The baseline scores stay, and current law is unchanged.
+4. **Compare.** Enter up to five IDs, for example `52-N-176, 52-K-240, 52-E-192`. Each card shows the three score layers. The guide underneath is the rules reading. Comparison does not call Cursor.
+5. **Ask.** The button at the bottom right can look a parcel up or ask what to verify first. Mapped facts appear first.
+
+Jev and Cursor keys are not in this repository. Publishing those keys would expose them, and GitHub secret scanning can revoke a published key, which would leave a judge unable to run those calls. After cloning, a judge can run the map, search, rules range, screened range, local integer, the rules reading in a comparison, and the local facts in Ask. Seeing Jev’s percentages, or a Cursor rewrite of an answer, requires the judge’s own keys in a local `.env` file copied from `.env.example`. Without those keys, comparison still shows the rules guide with an empty Jev choice list, and Ask keeps the mapped facts.
+
 ## Explore a site
 
 Start with a county parcel ID such as `52-N-176` or `0052N00176000000`, or zoom in and click a parcel on the map. The opening view outlines Pittsburgh while keeping the surrounding map visible for context. Parcel boundaries appear as you zoom closer; **City overview** and **Downtown example** provide quick ways to navigate. Search accepts a block-lot or a 16-character PIN, and can include the housing type in the same box: `52-N-176 1 unit`, `52-N-176 2 homes`, `52-N-176 double`, or `52-N-176 four`. The parcel opens on the map, and the housing button follows that phrase. A number that is part of the parcel ID, such as the `2` in `2-N-297`, is not read as a housing type.
@@ -79,14 +99,12 @@ Open [http://localhost:8787](http://localhost:8787). For development, run `npm r
 
 No API key is required for the map, public GIS data, rules range, screened range, or the default point estimate. Without `MODEL_PROXY_API_KEY`, that integer is placed locally inside the screened range. Ranking still uses the rules-range midpoint.
 
-Jev and Cursor are optional and are not included in this repository. Copy the variable names from `.env.example` into a local `.env` file, which git ignores:
+Jev and Cursor keys are intentionally absent. A local `.env` file, ignored by git, can hold a judge’s own keys:
 
 | Variable | What it unlocks |
 | --- | --- |
 | `JEV_API_KEY` | Comparison choices and percentages from Jev |
-| `CURSOR_API_KEY` | A Cursor rewrite after you ask a question |
+| `CURSOR_API_KEY` | A Cursor rewrite after an Ask question |
 | `MODEL_PROXY_API_KEY` | A remote model for the AI integer; otherwise the local placement is used |
-
-Without those keys the page still searches, scores, compares, and answers from the mapped rules. Jev’s choice list stays empty, and Ask keeps the rules text.
 
 The React interface is in `src/`, the Express service and scoring logic are in `server/`, and methodology notes are in `analysis/`.
