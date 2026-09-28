@@ -50,6 +50,18 @@ test('a zero building value and a short parcel are named in the review list', ()
   assert.ok(partial.review.some((entry) => entry.includes('m²')));
 });
 
+test('treating the published minimum as met adds the lot points only while the parcel is still short', () => {
+  const short = score({ areaSqM: 180, districts: r2 });
+  const met = score({ areaSqM: 180, districts: r2, policy: { meetPublishedMinimum: true } });
+  assert.equal(earned(short, 'lot-minimum'), 0);
+  assert.equal(earned(met, 'lot-minimum'), 12);
+  assert.equal(met.minimum - short.minimum, 12);
+  assert.equal(met.lotMinimumAssumedMet, true);
+  const already = score({ areaSqM: 400, districts: r2, policy: { meetPublishedMinimum: true } });
+  assert.equal(already.minimum, score({ areaSqM: 400, districts: r2 }).minimum);
+  assert.equal(already.lotMinimumAssumedMet, false);
+});
+
 test('building burden has three levels and infrastructure stays unknown', () => {
   assert.equal(earned(score(), 'existing-improvement-burden'), 10);
   assert.equal(earned(score({ assessment: { USEDESC: 'RESIDENTIAL', FAIRMARKETBUILDING: '0' } }), 'existing-improvement-burden'), 5);

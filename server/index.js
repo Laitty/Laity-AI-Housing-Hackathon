@@ -1,3 +1,4 @@
+import './load-env.js';
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,9 +9,13 @@ import { SCENARIOS, SOURCES } from './score.js';
 import { scoreSiteEase } from './score-ease.js';
 import { explainScore } from './explain-score.js';
 import { getDecisionAdvice } from './decision.js';
+import { buildJevInput, rulesGuide } from './jev-input.js';
+import { askJev } from './jev-client.js';
+import { askCursorChat } from './cursor-reading.js';
 import { parseParcelId, validateParcelMatch } from './parcel-id.js';
 import { loadSubjectFeature, loadNearbyContext } from './nearby-context.js';
 import { evaluateAiScore, placeSessionPoint, retrievalEstimate } from './ai-score.js';
+import { loadPolicyMoves, policyMoveResponse } from './policy-moves.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 8787;
@@ -269,6 +274,7 @@ function cleanPolicy(raw = {}) {
   return {
     allowResidentialUse: value.allowResidentialUse === true,
     reduceMinimumLot: value.reduceMinimumLot === true,
+    meetPublishedMinimum: value.meetPublishedMinimum === true,
     assumeUtilityCapacity: value.assumeUtilityCapacity === true,
   };
 }
@@ -299,8 +305,8 @@ function easeExplanation(evidence, scenario) {
     midpoint: midpoint(scoreEvidence(evidence, entry.id)),
   }));
   const policies = [
-    ['allowResidentialUse', 'Allow this use in the residential district', { allowResidentialUse: true }],
-    ['reduceMinimumLot', 'Reduce the published lot minimum by 20%', { reduceMinimumLot: true }],
+    ['allowResidentialUse', 'Allow this use where it is not listed', { allowResidentialUse: true }],
+    ['meetPublishedMinimum', 'Treat the published lot minimum as met', { meetPublishedMinimum: true }],
   ].map(([id, label, policy]) => ({
     id, label, pointGain: midpoint(scoreEvidence(evidence, scenario, policy)) - midpoint(current),
   }));
@@ -334,11 +340,35 @@ function handleError(response, error) {
 }
 
 app.use(express.json({ limit: '16kb' }));
+app.use((request, response, next) => {
+  const origin = request.headers.origin;
+  if (origin === 'http://127.0.0.1:5174' || origin === 'http://localhost:5174' || origin === 'http://127.0.0.1:5173' || origin === 'http://localhost:5173') {
+    response.setHeader('Access-Control-Allow-Origin', origin);
+    response.setHeader('Access-Control-Allow-Headers', 'content-type');
+    response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  }
+  if (request.method === 'OPTIONS') return response.sendStatus(204);
+  next();
+});
 app.get('/api/health', (_request, response) => response.json({ ok: true }));
 app.get('/api/scenarios', (_request, response) => response.json({ scenarios: Object.values(SCENARIOS) }));
+let policyMoveIndex = null;
+app.get('/api/policy-moves', (request, response) => {
+  const scenario = String(request.query.scenario || 'duplex');
+  if (!SCENARIOS[scenario]) return response.status(400).json({ error: 'Unknown housing scenario' });
+  try {
+    if (!policyMoveIndex) policyMoveIndex = loadPolicyMoves();
+    const payload = policyMoveResponse(policyMoveIndex, scenario);
+    if (!payload) return response.status(404).json({ error: 'No ZIP 15213 rows for this housing type.' });
+    response.json(payload);
+  } catch (error) {
+    handleError(response, error);
+  }
+});
 app.get('/api/decision-contract', (_request, response) => response.json({
   provider: 'rules-v1', contractVersion: '1.0',
   futureProvider: 'Jev adapter can replace getDecisionAdvice(context) in server/decision.js',
+  compareInput: 'jev-compare-input 1.0 on POST /api/compare as jevInput. Jev fills choices when JEV_API_KEY is set. The guide stays on the mapped rules. Cursor answers only POST /api/chat.',
   outputFields: ['obstacles', 'approvalPath', 'nextActions'],
 }));
 
@@ -490,7 +520,25 @@ app.post('/api/compare', async (request, response) => {
       results.push({ requested: entry.value, error: error.message });
     }
   }
-  response.json({ scenario: SCENARIOS[scenario], policy, results, queriedAt: new Date().toISOString() });
+  const jevInput = buildJevInput({ scenario: SCENARIOS[scenario], policy, results });
+  const jev = await askJev(jevInput);
+  const reading = rulesGuide(jevInput);
+  response.json({
+    scenario: SCENARIOS[scenario], policy, results, queriedAt: new Date().toISOString(),
+    jevInput, jev, reading,
+  });
+});
+
+app.post('/api/chat', async (request, response) => {
+  const question = String(request.body?.question || '').trim();
+  const facts = String(request.body?.facts || '').trim();
+  if (!question || !facts) return response.status(400).json({ error: 'Provide the question and the mapped facts.' });
+  try {
+    const reading = await askCursorChat(question, facts);
+    if (!response.headersSent) response.json(reading && typeof reading.text === 'string' ? reading : { status: 'rules', text: facts });
+  } catch {
+    if (!response.headersSent) response.json({ status: 'rules', text: facts });
+  }
 });
 
 app.post('/api/decision-advice', async (request, response) => {

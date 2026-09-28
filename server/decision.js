@@ -45,13 +45,14 @@ export function getDecisionAdvice(context) {
   }
 
   if (score.publishedMinimumSqFt && parcel.areaSqM * 10.7639104167 < score.publishedMinimumSqFt) {
-    const reliefOnlyInSimulation = policy.reduceMinimumLot && parcel.areaSqM * 10.7639104167 >= score.effectiveMinimumSqFt;
+    const assumedMet = policy.meetPublishedMinimum === true;
+    const reliefOnlyInSimulation = assumedMet || (policy.reduceMinimumLot && parcel.areaSqM * 10.7639104167 >= score.effectiveMinimumSqFt);
     obstacles.push(finding('Zoning', reliefOnlyInSimulation ? 'simulated' : 'confirmed',
-      reliefOnlyInSimulation ? 'Lot minimum met only in policy simulation' : 'Mapped parcel below published lot minimum',
-      `${Math.round(parcel.areaSqM * 10.7639104167)} mapped sq ft vs ${score.publishedMinimumSqFt} sq ft current minimum in § 903.03. ${reliefOnlyInSimulation ? 'A hypothetical 20% reduction opens this screen; current law is unchanged.' : 'The legal zoning lot and any existing-lot exception are unverified.'}`, SOURCES.residentialCode));
-    nextActions.push(action(1, reliefOnlyInSimulation ? 'Study the lot-size policy amendment' : 'Verify legal zoning-lot area and dimensional relief path',
-      reliefOnlyInSimulation ? 'This parcel improves only if the proposed minimum-lot change is enacted.' : 'If the legal lot remains below the applicable standard, ask whether an exception or dimensional variance may be considered.',
-      reliefOnlyInSimulation ? SOURCES.policy : SOURCES.reviewCode));
+      assumedMet ? 'Published minimum treated as met only in this score' : reliefOnlyInSimulation ? 'Lot minimum met only in policy simulation' : 'Mapped parcel below published lot minimum',
+      `${Math.round(parcel.areaSqM * 10.7639104167)} mapped sq ft vs ${score.publishedMinimumSqFt} sq ft current minimum in § 903.03. ${assumedMet ? 'Hypothetical only: the score treats that minimum as met. The mapped area is still short, and current law is unchanged.' : reliefOnlyInSimulation ? 'A hypothetical 20% reduction opens this screen; current law is unchanged.' : 'The legal zoning lot and any existing-lot exception are unverified.'}`, SOURCES.residentialCode));
+    nextActions.push(action(1, assumedMet ? 'Review the legal lot even though the hypothetical score treats the minimum as met' : reliefOnlyInSimulation ? 'Study the lot-size policy amendment' : 'Verify legal zoning-lot area and dimensional relief path',
+      assumedMet ? 'The hypothetical score adds the lot points. The mapped parcel is still below § 903.03, so the legal lot and any exception still need review.' : reliefOnlyInSimulation ? 'This parcel improves only if the proposed minimum-lot change is enacted.' : 'If the legal lot remains below the applicable standard, ask whether an exception or dimensional variance may be considered.',
+      assumedMet ? SOURCES.residentialCode : reliefOnlyInSimulation ? SOURCES.policy : SOURCES.reviewCode));
   } else if (score.publishedMinimumSqFt === null) {
     obstacles.push(finding('Zoning', 'verify', 'Dimensional standard not resolved',
       'The applicable numeric lot minimum or legal zoning lot has not been fully verified.', SOURCES.residentialCode));
@@ -166,6 +167,11 @@ export function getDecisionAdvice(context) {
     'A by-right base use still needs full code compliance, and unclear/mixed districts need City interpretation.',
     '§ 911.02; City Planning review guidance', SOURCES.planning));
   if (score.publishedMinimumSqFt && parcel.areaSqM * 10.7639104167 < score.effectiveMinimumSqFt) {
+    if (policy.meetPublishedMinimum) {
+      approvalPath.push(step('verify', 'Published lot minimum treated as met in this score',
+        'The mapped area is still below § 903.03. These points appear only in the hypothetical score. Current law is unchanged.',
+        '§ 903.03', SOURCES.residentialCode));
+    }
     approvalPath.push(step('possible', 'Dimensional variance or existing-lot provision',
       'Mapped area is below a published minimum; confirm the legal lot and whether relief is available. This tool cannot determine variance eligibility.',
       '§ 903.03; § 922.09', SOURCES.reviewCode));

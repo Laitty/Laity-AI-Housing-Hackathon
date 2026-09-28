@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import L from 'leaflet';
+import SiteChat from './SiteChat.jsx';
+import { namedScenario, parcelIds } from './site-chat.js';
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -57,7 +59,57 @@ function rangeText(minimum, maximum) {
   return minimum === maximum ? String(minimum) : `${minimum}–${maximum}`;
 }
 
-function ScoreHeadline({ score, estimate, large = false }) {
+function policyLine(impact) {
+  if (!impact?.hypothetical) return '';
+  const switches = [
+    impact.intervention?.allowResidentialUse && 'this use is treated as listed',
+    impact.intervention?.meetPublishedMinimum && 'the published lot minimum is treated as met',
+  ].filter(Boolean);
+  const after = impact.hypothetical;
+  if (!switches.length) return '';
+  if (!after.displayRange) return `Hypothetical (${switches.join('; ')}): this parcel still needs review. The baseline score stays.`;
+  const delta = impact.scoreChange;
+  if (delta == null) return `Hypothetical rules range ${rangeText(after.minimum, after.maximum)} if ${switches.join('; ')}. Current law is unchanged.`;
+  if (delta === 0) return `Hypothetical rules range stays ${rangeText(after.minimum, after.maximum)}. ${switches.join('; ')} adds no points on this parcel. Current law is unchanged.`;
+  return `Hypothetical rules range ${rangeText(after.minimum, after.maximum)} if ${switches.join('; ')}. Lower bound ${delta > 0 ? '+' : ''}${delta}. Current law is unchanged.`;
+}
+
+function policyOffers(evaluation) {
+  const use = evaluation?.score?.items?.find((item) => item.key === 'use');
+  const lot = evaluation?.score?.items?.find((item) => item.key === 'lot-minimum');
+  const units = evaluation?.scenario?.units ?? 0;
+  const useOffer = !evaluation
+    ? { applicable: false, gain: 0, reason: 'Select a parcel to see whether allowing this use changes its score.' }
+    : use?.earned === 0
+      ? { applicable: true, gain: units >= 4 ? 16 : 28, reason: units >= 4 ? 'This use is not listed. Allowing it adds 16. Site plan review still applies.' : 'This use is not listed by-right. Allowing it adds 28 to the rules lower bound.' }
+      : use?.earned == null
+        ? { applicable: false, gain: 0, reason: 'The residential base district is not verified, so this switch cannot be applied. +0.' }
+        : { applicable: false, gain: 0, reason: units >= 4 && use.earned === 16 ? 'This use is already listed. Site plan review keeps the item at 16. +0.' : 'This use is already listed by-right. +0.' };
+  const lotOffer = !evaluation
+    ? { applicable: false, gain: 0, reason: 'Select a parcel to see whether the published lot minimum is a barrier.' }
+    : lot?.earned === 0
+      ? { applicable: true, gain: lot.weight, reason: 'Mapped area is below the published minimum. Treating that minimum as met adds 12. The mapped area stays short.' }
+      : lot?.earned == null
+        ? { applicable: false, gain: 0, reason: 'A numeric lot minimum is not verified for this district. +0.' }
+        : { applicable: false, gain: 0, reason: 'Mapped area already meets the published minimum. +0.' };
+  return { use: useOffer, lot: lotOffer };
+}
+
+function utilityNote(estimate) {
+  const applied = estimate?.status === 'ready' ? estimate.result?.applied?.find((item) => item.key === 'utilities') : null;
+  if (!applied) return 'Water and sewer is unknown in the rules score on every parcel. Filling all 15 points would raise every lower bound by the same amount, so rank does not change.';
+  if (!applied.residual) return `The screened range counts ${applied.earned} of ${applied.weight} for water and sewer, which is this screen’s cap. Rank still does not use this item.`;
+  return `Screened water and sewer still has ${applied.residual} of ${applied.weight} open (${applied.earned} counted). Closing those ${applied.residual} points does not change parcel order. A full rules fill would add the same 15 everywhere.`;
+}
+
+function PolicyOffer({ offer, checked, onChange, title, disabled }) {
+  return <button type="button" className={`policy-offer ${checked ? 'on' : ''}`} aria-pressed={checked} disabled={disabled} onClick={() => onChange(!checked)}>
+    <span className="policy-offer-top"><strong>{title}</strong><b>{offer.badge || (offer.gain > 0 ? `+${offer.gain}` : '+0')}</b></span>
+    <p>{offer.reason}</p>
+  </button>;
+}
+
+function ScoreHeadline({ score, estimate, policyImpact, utilityNote: utilityText = '', large = false }) {
   const ready = estimate?.status === 'ready' ? estimate.result : null;
   const point = ready?.agent?.point;
   const rules = ready ? rangeText(ready.rulesMinimum, ready.rulesMaximum) : scoreLabel(score);
@@ -71,6 +123,8 @@ function ScoreHeadline({ score, estimate, large = false }) {
     <p><b>Rules range</b> {rules}</p>
     {ready?.agent?.provider === 'session-placement' && <small>Placed on this machine. The remote model was not called.</small>}
     {estimate?.status === 'failed' && <small>{estimate.error}</small>}
+    {policyImpact && <p className="policy-result">{policyLine(policyImpact)}</p>}
+    {utilityText && <p className="policy-result">{utilityText}</p>}
   </div>;
 }
 
@@ -224,21 +278,17 @@ function FloatingReport({ label, onClose, mapAreaRef, mapRef, parcelBounds, comp
     event.stopPropagation();
     manuallyPlaced.current = true;
     const start = keepInsideMap(currentGeometry());
-    const sheet = sheetRef.current;
-    sheet.classList.add('is-dragging');
-    sheet.style.willChange = mode === 'move' ? 'transform' : 'width, height';
     const onMove = (moveEvent) => moveInteraction(moveEvent);
     const onEnd = (endEvent) => endInteraction(endEvent);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onEnd);
     window.addEventListener('pointercancel', onEnd);
     interaction.current = {
-      mode, pointerId: event.pointerId, x: event.clientX, y: event.clientY, start, preview: start, frame: null,
+      mode, pointerId: event.pointerId, x: event.clientX, y: event.clientY, start,
       cleanup: () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onEnd);
         window.removeEventListener('pointercancel', onEnd);
-        cancelAnimationFrame(interaction.current?.frame);
       },
     };
     setGeometry(start);
@@ -255,36 +305,12 @@ function FloatingReport({ label, onClose, mapAreaRef, mapRef, parcelBounds, comp
     const next = active.mode === 'move'
       ? { ...active.start, left: active.start.left + dx, top: active.start.top + dy }
       : { ...active.start, width: Math.min(maxWidth, Math.max(Math.min(300, maxWidth), active.start.width + dx)), height: Math.min(maxHeight, Math.max(Math.min(230, maxHeight), active.start.height + dy)) };
-    active.preview = keepInsideMap(next);
-    if (active.frame !== null) return;
-    active.frame = requestAnimationFrame(() => {
-      const sheet = sheetRef.current;
-      if (!sheet) return;
-      if (active.mode === 'move') {
-        sheet.style.transform = `translate3d(${active.preview.left - active.start.left}px, ${active.preview.top - active.start.top}px, 0)`;
-      } else {
-        sheet.style.width = `${active.preview.width}px`;
-        sheet.style.height = `${active.preview.height}px`;
-      }
-      active.frame = null;
-    });
+    setGeometry(keepInsideMap(next));
   }
 
   function endInteraction(event) {
-    const active = interaction.current;
-    if (active?.pointerId !== event.pointerId) return;
-    active.cleanup();
-    const sheet = sheetRef.current;
-    if (sheet) {
-      sheet.style.left = `${active.preview.left}px`;
-      sheet.style.top = `${active.preview.top}px`;
-      sheet.style.width = `${active.preview.width}px`;
-      sheet.style.height = `${active.preview.height}px`;
-      sheet.style.transform = '';
-      sheet.style.willChange = '';
-      sheet.classList.remove('is-dragging');
-    }
-    setGeometry(active.preview);
+    if (interaction.current?.pointerId !== event.pointerId) return;
+    interaction.current.cleanup();
     interaction.current = null;
   }
 
@@ -320,42 +346,24 @@ function FloatingReport({ label, onClose, mapAreaRef, mapRef, parcelBounds, comp
   </aside>;
 }
 
-function CompactScore({ evaluation, estimate, onShowDetails }) {
+function CompactScore({ evaluation, estimate, utilityText, onShowDetails }) {
   const { score, explanation, scenario } = evaluation;
   const summary = explanation?.summary?.split('. ')[0];
   return <div className="compact-score">
     <span className="compact-score-kicker">DEVELOPMENT EASE · {scenario.title.toUpperCase()}</span>
-    <ScoreHeadline score={score} estimate={estimate} large />
+    <ScoreHeadline score={score} estimate={estimate} policyImpact={evaluation.policyImpact} utilityNote={utilityText} large />
     <p className="compact-score-summary">{summary ? `${summary.replace(/\.$/, '')}.` : 'This site needs a closer look before drawing a development conclusion.'}</p>
     <button className="compact-score-details" type="button" onClick={onShowDetails}>View full details <ArrowUpRight size={16} /></button>
   </div>;
 }
 
-function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, selectedScenario, areaLabel, zoningReviewReasons, scrollTargetRef, estimate, onEstimate }) {
+function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, areaLabel, zoningReviewReasons, scrollTargetRef, estimate, utilityText, onEstimate }) {
   const { score, overlays, assessment, sourceErrors, queriedAt, decision, idEvidence, districts = [] } = evaluation;
   const [activeTab, setActiveTab] = useState('overview');
-  const scenarioScrollTop = useRef(null);
   const ruleFindings = decision.obstacles.filter((entry) => ['Zoning', 'Policy'].includes(entry.category));
   const riskFindings = decision.obstacles.filter((entry) => ['Environment', 'Infrastructure'].includes(entry.category));
   const keyConstraint = decision.obstacles.find((entry) => entry.status === 'confirmed' && !/^(Base use appears|No mapped|Assessment records)/.test(entry.title));
   const firstVerification = decision.obstacles.find((entry) => entry.status === 'verify');
-
-  function rememberScenarioScroll() {
-    scenarioScrollTop.current = scrollTargetRef.current?.closest('.sidebar-content')?.scrollTop ?? null;
-  }
-
-  function changeScenarioHere(nextScenario) {
-    const report = scrollTargetRef.current;
-    const sidebar = report?.closest('.sidebar-content');
-    const previousTop = scenarioScrollTop.current ?? sidebar?.scrollTop;
-    scenarioScrollTop.current = null;
-    if (report) report.style.minHeight = `${Math.ceil(report.getBoundingClientRect().height)}px`;
-    onScenarioChange(nextScenario);
-    if (sidebar && previousTop != null) {
-      sidebar.scrollTop = previousTop;
-      requestAnimationFrame(() => { if (sidebar.isConnected) sidebar.scrollTop = previousTop; });
-    }
-  }
 
   function changeTab(tab) {
     setActiveTab(tab);
@@ -380,7 +388,7 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, selectedSce
     <div id="report-tab-panel" role="tabpanel" aria-labelledby={`report-tab-${activeTab}`} className="report-tab-panel" key={activeTab}>
       {activeTab === 'overview' && <>
         <div className="evaluation-heading"><span>DEVELOPMENT EASE · PROTOTYPE</span><small>{evaluation.scenario.title.toUpperCase()}</small></div>
-        <ScoreHeadline score={score} estimate={estimate} />
+        <ScoreHeadline score={score} estimate={estimate} policyImpact={evaluation.policyImpact} utilityNote={utilityText} />
         <p className="score-caption"><b>Evidence coverage: {score.knownWeight}/100 weighted points.</b> The integer is the AI estimate. The screened range is the narrowed band. The rules range is the scoring standard. This is a relative screening score, not a permit decision.</p>
         <div className={`evidence-coverage ${score.knownWeight < 100 ? 'partial' : 'complete'}`} role="img" aria-label={`${score.knownWeight} of 100 weighted points have source data`}><span style={{ width: `${score.knownWeight}%` }} /></div>
         {evaluation.explanation && <section className="score-explanation"><h3>Why this score</h3><p>{evaluation.explanation.summary}</p><p><b>Highest-impact change.</b> {evaluation.explanation.intervention.sentence}</p></section>}
@@ -399,7 +407,7 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, selectedSce
           {decision.nextActions[0] && <div className="highlight-action"><span>FIRST ACTION</span><strong>{decision.nextActions[0].title}</strong></div>}
         </div>
         {scenarioOptions?.length > 0 && <section className="scenario-matrix"><h3>Same parcel · housing options</h3><div>
-          {scenarioOptions.map((option) => <button type="button" className={option.scenario.id === selectedScenario ? 'active' : ''} key={option.scenario.id} onPointerDownCapture={rememberScenarioScroll} onClick={() => changeScenarioHere(option.scenario.id)}>
+          {scenarioOptions.map((option) => <button type="button" className={option.scenario.id === evaluation.scenario.id ? 'active' : ''} key={option.scenario.id} onClick={() => onScenarioChange(option.scenario.id)}>
             <span>{option.scenario.title}</span><strong>{scoreLabel(option.score)}</strong>
           </button>)}
         </div><p>Each building type has its own score. A lower number is a harder path for that building, and the range stays visible.</p></section>}
@@ -444,14 +452,14 @@ function ScorePanel({ evaluation, scenarioOptions, onScenarioChange, selectedSce
   </div>;
 }
 
-function ComparisonBoard({ comparison, loading, error, onOpen, onClear, scenario, policy, expanded, onToggle, count }) {
+function ComparisonBoard({ comparison, estimates, loading, error, onOpen, onClear, scenario, expanded, onToggle, count }) {
   return <section className={`comparison-board ${expanded ? 'expanded' : ''}`} aria-label="Parcel comparison">
     <div className="comparison-header"><div><span>02 / PARCEL COMPARISON · {count} {count === 1 ? 'SITE' : 'SITES'}{loading ? ' · UPDATING' : ''}</span><h2>{SCENARIOS.find((entry) => entry.id === scenario)?.title} · same scenario</h2></div>
       <div className="comparison-header-actions"><button className="comparison-toggle" type="button" aria-expanded={expanded} aria-controls="comparison-content" onClick={onToggle}>{expanded ? 'Hide results' : 'Show results'} {expanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</button><button className="comparison-clear" type="button" onClick={onClear} aria-label="Clear comparison"><X size={16} /></button></div>
     </div>
     <div className="comparison-content" id="comparison-content" hidden={!expanded}>
-    <p className="comparison-intro">Scores compare the same building type. Each parcel can score differently for one home, two homes, four homes, or a repair. Policy changes are hypothetical.</p>
-    {loading && <p className="comparison-loading">Comparing county parcels and source layers…</p>}
+    <p className="comparison-intro">Scores compare the same building type. Policy changes are hypothetical. Jev supplies the screening preference. The guide stays on the mapped rules. Neither one is an approval.</p>
+    {loading && <p className="comparison-loading">Comparing county parcels, then asking Jev…</p>}
     {error && <p className="source-warning">{error}</p>}
     {comparison && <div className="comparison-cards">{comparison.results.map((result) => {
       const value = result.evaluation;
@@ -463,11 +471,22 @@ function ComparisonBoard({ comparison, loading, error, onOpen, onClear, scenario
       return <article className="compare-card" key={result.requested}>
         <div className="compare-card-top"><span>{value.blockLot || result.requested}</span><button type="button" onClick={() => onOpen(value.pin)}>View on map <ArrowUpRight size={14} /></button></div>
         <small>PIN {value.pin} · {value.districts?.map((item) => item.code).join(' / ') || 'Zoning unknown'}</small>
-        <div className="compare-score"><strong>{scoreLabel(value.score)}</strong><span>{value.score.displayRange ? '/ 100 baseline' : value.score.status}</span></div>
-        {impact && <p className="compare-impact"><b>Policy simulation:</b> {impact.newlyScreenable ? `new preliminary screen ${scoreLabel(hypothetical)}/100` : impact.scoreChange > 0 ? `+${impact.scoreChange} points` : hypothetical.displayRange ? `${scoreLabel(hypothetical)}/100; no score gain` : 'still needs review'}{policy.assumeUtilityCapacity ? ' · water and sewer capacity filled in the hypothetical only' : ''}</p>}
+        <div className="compare-score"><strong>{estimates[value.pin]?.status === 'ready' && estimates[value.pin].result?.agent?.point != null ? estimates[value.pin].result.agent.point : estimates[value.pin]?.status === 'failed' ? '—' : '…'}</strong><span>AI estimate / 100</span></div>
+        <p className="compare-ranges"><b>Screened</b> {estimates[value.pin]?.status === 'ready' ? rangeText(estimates[value.pin].result.estimatedMinimum, estimates[value.pin].result.estimatedMaximum) : '…'} · <b>Rules</b> {scoreLabel(value.score)}</p>
+        {impact && <p className="compare-impact"><b>Policy simulation:</b> {impact.newlyScreenable ? `new preliminary screen ${scoreLabel(hypothetical)}/100` : impact.scoreChange > 0 ? `+${impact.scoreChange} points` : hypothetical.displayRange ? `${scoreLabel(hypothetical)}/100; no score gain` : 'still needs review'}</p>}
         <div className="compare-facts"><p><b>Confirmed source findings</b> {obstacles.length ? obstacles.slice(0, 2).map((item) => item.title).join(' · ') : 'No mapped obstacle in screened factors'}</p><p><b>Needs verification</b> {unresolved.slice(0, 2).map((item) => item.title).join(' · ')}</p><p><b>First action</b> {value.decision.nextActions[0]?.title || 'Review with City Planning'}</p></div>
       </article>;
     })}</div>}
+    {comparison?.jev && <section className="jev-band" aria-label="Jev choices">
+      <div><span>JEV</span><strong>{comparison.jev.choices?.length ? 'Provided by Jev' : comparison.jev.status === 'not-connected' ? 'Not connected' : comparison.jev.status}</strong></div>
+      <p>{comparison.jev.statement}</p>
+      {comparison.jev.choices?.length > 0 ? <ol>{comparison.jev.choices.map((choice) => <li key={choice.candidateId}>{choice.label} · {Math.round(choice.probability * 100)}% <small>Provided by Jev</small></li>)}</ol> : <p className="jev-empty">No choice or probability is shown.</p>}
+    </section>}
+    {comparison?.reading && <section className="reading-band" aria-label="Comparison guide">
+      <div><span>GUIDE</span><strong>{comparison.reading.provider === 'cursor' ? 'Cursor' : comparison.reading.status === 'rules' ? 'Rules reading' : 'Model reading'}</strong></div>
+      <p>{comparison.reading.statement}</p>
+      <ol>{(comparison.reading.points || []).map((point) => <li key={point.heading}><b>{point.heading}</b> {point.text} {point.links?.map((link) => <a key={link.href} href={link.href} target="_blank" rel="noreferrer">{link.label}</a>)}</li>)}</ol>
+    </section>}
     </div>
   </section>;
 }
@@ -484,7 +503,7 @@ export default function App() {
   const selectionSerial = useRef(0);
   const parcelRequest = useRef(null);
   const parcelZoningRequest = useRef(null);
-  const scenarioRef = useRef('duplex');
+  const scenarioRef = useRef('starter');
   const comparisonExpandedRef = useRef(false);
   const sidebarReport = useRef(null);
   const sidebarDrag = useRef(null);
@@ -493,15 +512,17 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [estimate, setEstimate] = useState(null);
-  const [scenario, setScenario] = useState('duplex');
+  const [scenario, setScenario] = useState('starter');
   const [comparisonInput, setComparisonInput] = useState('');
   const [comparisonIds, setComparisonIds] = useState([]);
   const [comparison, setComparison] = useState(null);
   const [comparisonLoading, setComparisonLoading] = useState(false);
   const [comparisonError, setComparisonError] = useState('');
   const [comparisonExpanded, setComparisonExpanded] = useState(false);
+  const [comparisonEstimates, setComparisonEstimates] = useState({});
   const [boundaryStatus, setBoundaryStatus] = useState('loading');
-  const [policy, setPolicy] = useState({ allowResidentialUse: false, reduceMinimumLot: false, assumeUtilityCapacity: false });
+  const [policy, setPolicy] = useState({ allowResidentialUse: false, meetPublishedMinimum: false });
+  const [showUtility, setShowUtility] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(390);
   const [zoom, setZoom] = useState(12);
   const [parcelCount, setParcelCount] = useState(0);
@@ -641,6 +662,27 @@ export default function App() {
   }, [selected?.pin, selected?.lookupId, selected?.evaluation?.scenario?.id, scenario]);
 
   useEffect(() => {
+    const pin = selected?.lookupId || selected?.pin;
+    if (!pin || selected?.evaluation?.scenario?.id !== scenario) return undefined;
+    const stamp = [policy.allowResidentialUse, policy.meetPublishedMinimum].join('|');
+    if (selected.evaluation.policyStamp === stamp) return undefined;
+    const active = policy.allowResidentialUse || policy.meetPublishedMinimum;
+    if (!active) {
+      setSelected((previous) => previous?.evaluation ? { ...previous, evaluation: { ...previous.evaluation, policyImpact: null, policyStamp: stamp } } : previous);
+      return undefined;
+    }
+    const controller = new AbortController();
+    getJSON('/api/compare', controller.signal, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ids: [pin], scenario, policy }),
+    }).then((data) => {
+      const impact = data.results?.[0]?.evaluation?.policyImpact ?? null;
+      setSelected((previous) => previous?.pin === selected.pin && previous.evaluation ? { ...previous, evaluation: { ...previous.evaluation, policyImpact: impact, policyStamp: stamp } } : previous);
+    }).catch((error) => { if (error.name !== 'AbortError') setNotice(error.message); });
+    return () => controller.abort();
+  }, [policy, selected?.pin, selected?.lookupId, selected?.evaluation?.scenario?.id, selected?.evaluation?.queriedAt, selected?.evaluation?.policyStamp, scenario]);
+
+  useEffect(() => {
     if (!comparisonIds.length) return;
     const controller = new AbortController();
     setComparison(null);
@@ -654,6 +696,24 @@ export default function App() {
     }).finally(() => { if (!controller.signal.aborted) setComparisonLoading(false); });
     return () => controller.abort();
   }, [comparisonIds, scenario, policy]);
+
+  useEffect(() => {
+    const pins = (comparison?.results || []).map((result) => result.evaluation?.pin).filter(Boolean);
+    if (!pins.length) {
+      setComparisonEstimates({});
+      return undefined;
+    }
+    const controller = new AbortController();
+    Promise.all(pins.map((pin) => getJSON('/api/ai-score', controller.signal, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: pin, scenario }),
+    }).then((data) => [pin, data]).catch((error) => [pin, error.name === 'AbortError' ? null : { status: 'failed' }])))
+      .then((pairs) => {
+        if (controller.signal.aborted) return;
+        setComparisonEstimates(Object.fromEntries(pairs.filter((entry) => entry[1])));
+      });
+    return () => controller.abort();
+  }, [comparison, scenario]);
 
   useEffect(() => {
     const instance = L.map(mapElement.current, {
@@ -759,10 +819,10 @@ export default function App() {
     return () => currentMap.off('moveend', refreshMap);
   }, [refreshMap]);
 
-  async function searchParcel(event) {
-    event.preventDefault();
-    const term = query.trim();
+  async function openParcelById(lookup) {
+    const term = `${lookup}`.trim();
     if (!term) return;
+    setQuery(term);
     setLoading((previous) => ({ ...previous, search: true }));
     setNotice('');
     try {
@@ -780,14 +840,39 @@ export default function App() {
     }
   }
 
+  function useHousing(text) {
+    const housing = namedScenario(text);
+    if (!housing || housing === scenarioRef.current) return;
+    scenarioRef.current = housing;
+    setScenario(housing);
+  }
+
+  async function searchParcel(event) {
+    event.preventDefault();
+    const ids = parcelIds(query);
+    useHousing(query);
+    await openParcelById(ids[0] || query.trim());
+  }
+
+  function compareFromChat(ids, housing) {
+    if (housing && housing !== scenario) setScenario(housing);
+    setComparisonError('');
+    setComparisonInput(ids.join(', '));
+    setComparisonIds(ids);
+    setComparisonExpanded(true);
+  }
+
   function compareParcels(event) {
     event.preventDefault();
-    const ids = comparisonInput.toUpperCase().split(/[\s,;]+/).filter(Boolean);
+    const ids = parcelIds(comparisonInput);
     if (ids.length < 1 || ids.length > 5) {
-      setComparisonError('Enter 1–5 parcel IDs, separated by commas or spaces.');
+      setComparisonError('Enter 1–5 parcel IDs. A housing type such as 1 unit, 2 homes, double, or four can sit beside them.');
       return;
     }
+    useHousing(comparisonInput);
     setComparison(null);
+    setComparisonError('');
+    setComparisonInput(ids.join(', '));
     setComparisonIds(ids);
     setComparisonExpanded(true);
   }
@@ -827,11 +912,6 @@ export default function App() {
 
   function togglePolicy(key, checked) {
     setPolicy((previous) => ({ ...previous, [key]: checked }));
-    if (selected?.pin && !comparisonIds.length) {
-      setComparisonIds([selected.pin]);
-      setComparisonInput(selected.pin);
-      setComparisonExpanded(true);
-    }
   }
 
   function clearSelection() {
@@ -866,6 +946,7 @@ export default function App() {
   if (districts.length > 1) zoningReviewReasons.push('This parcel crosses multiple zoning districts');
   if (districts.some((district) => district.status !== 'Approved')) zoningReviewReasons.push('a GIS status is pending or not recorded');
   if (districts.length > 0 && (districtShare < 99.5 || districtShare > 100.5)) zoningReviewReasons.push('the GIS boundaries do not align fully');
+  const utilityText = showUtility && selected?.evaluation?.scenario?.id === scenario ? utilityNote(estimate) : '';
 
   return (
     <div className="app-shell">
@@ -889,10 +970,13 @@ export default function App() {
               <label htmlFor="parcel-search"><span>FIND A SITE</span><small>01 / SEARCH</small></label>
               <div className="search-control">
                 <Search size={18} strokeWidth={1.8} />
-                <input id="parcel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="e.g. 2-J-129" autoComplete="off" />
+                <input id="parcel-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="e.g. 52-N-176 1 unit" autoComplete="off" />
                 <button type="submit" aria-label="Search parcel" disabled={loading.search}>{loading.search ? <span className="tiny-spinner" /> : <ArrowUpRight size={18} />}</button>
               </div>
-              <p>Search a full PIN or county block/lot ID · e.g. 85-N-171</p>
+              <p>Search by block/lot or parcel ID. Add a type such as 1 unit, 2 homes, double, or four.</p>
+              <div className="search-examples">
+                {['85-N-171', '85-N-163', '2-N-297'].map((id) => <button type="button" key={id} onClick={() => openParcelById(id)}>{id}</button>)}
+              </div>
             </form>
 
             {notice && <div className="notice" role="status"><span>!</span>{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notice"><X size={14} /></button></div>}
@@ -916,22 +1000,19 @@ export default function App() {
             </section>
 
             <section className="sidebar-disclosure" aria-label="Planning tools">
-              <div className="sidebar-disclosure-heading"><span className="disclosure-icon"><Compass size={16} /></span><span><strong>Planning tools</strong><small>Policy simulation</small></span></div>
+              <div className="sidebar-disclosure-heading"><span className="disclosure-icon"><Compass size={16} /></span><span><strong>Planning tools</strong><small>Click a parcel, then choose a change</small></span></div>
               <div className="disclosure-body"><section className="policy-controls" aria-label="Hypothetical policy interventions">
-                <strong>Policy / resource simulation</strong>
-                <p>Hypothetical changes only. Source GIS and baseline scores stay visible.</p>
-                {[
-                  ['allowResidentialUse', 'Allow selected use in residential districts'],
-                  ['reduceMinimumLot', 'Reduce published lot minimum by 20%'],
-                  ['assumeUtilityCapacity', 'Assume utility capacity is available'],
-                ].map(([key, label]) => <label key={key}><input type="checkbox" checked={policy[key]} onChange={(event) => togglePolicy(key, event.target.checked)} />{label}</label>)}
+                <strong>Policy scenarios</strong>
+                <p>Select a parcel on the map or from the IDs above. These choices stay hypothetical. The baseline score stays, and current law is unchanged.</p>
+                <PolicyOffer title="Allow this use where it is not listed" offer={policyOffers(selected?.evaluation?.scenario?.id === scenario ? selected.evaluation : null).use} checked={policy.allowResidentialUse} disabled={selected?.evaluation?.scenario?.id !== scenario} onChange={(checked) => togglePolicy('allowResidentialUse', checked)} />
+                <PolicyOffer title="Treat the published lot minimum as met" offer={policyOffers(selected?.evaluation?.scenario?.id === scenario ? selected.evaluation : null).lot} checked={policy.meetPublishedMinimum} disabled={selected?.evaluation?.scenario?.id !== scenario} onChange={(checked) => togglePolicy('meetPublishedMinimum', checked)} />
+                <PolicyOffer title="Water and sewer" offer={{ gain: 0, badge: (() => { const applied = selected?.evaluation?.scenario?.id === scenario && estimate?.status === 'ready' ? estimate.result?.applied?.find((item) => item.key === 'utilities') : null; return applied?.residual ? `${applied.residual} open` : '+0'; })(), reason: selected?.evaluation?.scenario?.id === scenario ? utilityNote(estimate) : 'Select a parcel to see the open water and sewer points.' }} checked={showUtility} disabled={selected?.evaluation?.scenario?.id !== scenario} onChange={setShowUtility} />
               </section></div>
             </section>
 
-            {detailsOpen && selected?.evaluation && <section className="sidebar-report" ref={sidebarReport} aria-label={`Full site report for ${selected.properties.MAPBLOCKLOT || selected.pin}`} aria-busy={selected.evaluation.scenario.id !== scenario && selected.zoningLoading}>
+            {detailsOpen && selected?.evaluation?.scenario.id === scenario && <section className="sidebar-report" ref={sidebarReport} aria-label={`Full site report for ${selected.properties.MAPBLOCKLOT || selected.pin}`}>
               <div className="sidebar-report-heading"><span>FULL SITE REPORT</span><strong>{selected.properties.MAPBLOCKLOT || selected.pin}</strong><button type="button" onClick={addSelectedToComparison}>Add to comparison <ArrowUpRight size={14} /></button></div>
-              {selected.evaluation.scenario.id !== scenario && <p className="scenario-update" role="status">{selected.zoningError ? `Could not update this scenario: ${selected.zoningError}. Showing the previous report.` : 'Updating this scenario… Previous report remains visible.'}</p>}
-              <ScorePanel key={selected.pin} evaluation={selected.evaluation} scenarioOptions={selected.scenarioOptions} onScenarioChange={setScenario} selectedScenario={scenario} areaLabel={areaLabel} zoningReviewReasons={zoningReviewReasons} scrollTargetRef={sidebarReport} estimate={estimate} onEstimate={runEstimate} />
+              <ScorePanel key={selected.pin} evaluation={selected.evaluation} scenarioOptions={selected.scenarioOptions} onScenarioChange={setScenario} areaLabel={areaLabel} zoningReviewReasons={zoningReviewReasons} scrollTargetRef={sidebarReport} estimate={estimate} utilityText={utilityText} onEstimate={runEstimate} />
             </section>}
 
           </div>
@@ -949,11 +1030,12 @@ export default function App() {
           {selected && <FloatingReport key={selected.selectionId} label={selected.properties.MAPBLOCKLOT || selected.pin} onClose={clearSelection} mapAreaRef={mapArea} mapRef={map} parcelBounds={selected.parcelBounds} comparisonExpanded={comparisonExpanded}>
             {selected.zoningLoading && selected.evaluation?.scenario.id !== scenario && <div className="report-loading" role="status"><span className="report-loading-label"><span className="tiny-spinner" /> Checking zoning, site conditions, and source records…</span><span className="skeleton-line skeleton-wide" /><span className="skeleton-line skeleton-mid" /></div>}
             {selected.zoningError && selected.evaluation?.scenario.id !== scenario && <p className="source-warning report-error">{selected.zoningError}</p>}
-            {selected.evaluation?.scenario.id === scenario && <CompactScore evaluation={selected.evaluation} estimate={estimate} onShowDetails={showFullReport} />}
+            {selected.evaluation?.scenario.id === scenario && <CompactScore evaluation={selected.evaluation} estimate={estimate} utilityText={utilityText} onShowDetails={showFullReport} />}
           </FloatingReport>}
         </section>
-        {comparisonIds.length > 0 && <ComparisonBoard comparison={comparison} loading={comparisonLoading} error={comparisonError} onOpen={openComparisonParcel} onClear={clearComparison} scenario={scenario} policy={policy} expanded={comparisonExpanded} onToggle={() => setComparisonExpanded((value) => !value)} count={comparisonIds.length} />}
+        {comparisonIds.length > 0 && <ComparisonBoard comparison={comparison} estimates={comparisonEstimates} loading={comparisonLoading} error={comparisonError} onOpen={openComparisonParcel} onClear={clearComparison} scenario={scenario} expanded={comparisonExpanded} onToggle={() => setComparisonExpanded((value) => !value)} count={comparisonIds.length} />}
       </main>
+      <SiteChat scenario={scenario} policy={policy} selected={selected} estimate={estimate} lifted={comparisonExpanded ? 'board' : comparisonIds.length ? 'bar' : ''} onOpenParcel={openParcelById} onUseScenario={setScenario} onCompare={compareFromChat} />
     </div>
   );
 }

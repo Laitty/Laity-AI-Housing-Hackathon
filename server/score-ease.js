@@ -91,10 +91,11 @@ export function scoreSiteEase(input, weightOverrides = {}) {
   const publishedMinimum = residentialBase ? LOT_MINIMUM_SQ_FT[density] ?? null : null;
   const effectiveMinimum = publishedMinimum && policy.reduceMinimumLot ? publishedMinimum * 0.8 : publishedMinimum;
   const areaSqFt = Number(input.areaSqM) * 10.7639104167;
-  const lotEarned = effectiveMinimum == null ? null : areaSqFt >= effectiveMinimum ? weights.lot : 0;
+  const lotAssumedMet = Boolean(publishedMinimum) && areaSqFt < publishedMinimum && policy.meetPublishedMinimum === true;
+  const lotEarned = effectiveMinimum == null ? null : (areaSqFt >= effectiveMinimum || lotAssumedMet) ? weights.lot : 0;
   items.push(item('Approval path', 'lot-minimum', 'Published minimum lot size', weights.lot, lotEarned,
     publishedMinimum
-      ? `${Math.round(areaSqFt).toLocaleString('en-US')} sq ft mapped parcel area vs ${publishedMinimum.toLocaleString('en-US')} sq ft published ${density} minimum${policy.reduceMinimumLot ? ` (${Math.round(effectiveMinimum).toLocaleString('en-US')} sq ft hypothetical 20% reduction)` : ''}.`
+      ? `${Math.round(areaSqFt).toLocaleString('en-US')} sq ft mapped parcel area vs ${publishedMinimum.toLocaleString('en-US')} sq ft published ${density} minimum${policy.reduceMinimumLot ? ` (${Math.round(effectiveMinimum).toLocaleString('en-US')} sq ft hypothetical 20% reduction)` : ''}${lotAssumedMet ? '. Hypothetical only: this score treats the published minimum as met. The mapped area is still short, and current law is unchanged' : ''}.`
       : 'A numeric minimum lot size is not verified for this district, or the district is not established.',
     SOURCES.residentialCode));
   if (lotEarned === 0) review.push('Mapped parcel area is below the published minimum in this screen.');
@@ -157,8 +158,9 @@ export function scoreSiteEase(input, weightOverrides = {}) {
     publishedMinimumSqFt: publishedMinimum,
     effectiveMinimumSqFt: effectiveMinimum,
     policyUseChange,
+    lotMinimumAssumedMet: lotAssumedMet,
     status: !residentialBase ? 'Base zoning is unverified; the range includes that uncertainty'
-      : policyUseChange || policy.reduceMinimumLot || policy.assumeUtilityCapacity ? 'Hypothetical policy scenario'
+      : policyUseChange || policy.reduceMinimumLot || policy.meetPublishedMinimum || policy.assumeUtilityCapacity ? 'Hypothetical policy scenario'
         : useFinding === 'not-listed-by-right' ? 'Use is not listed by-right; the score includes that barrier'
           : lotEarned === 0 ? 'Minimum lot size review required'
             : 'Preliminary screening range',
